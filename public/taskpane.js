@@ -405,6 +405,7 @@ async function readActiveSelection() {
         rowCount: 0,
         columnCount: 0,
         headers: [],
+        columnProfiles: [],
         sampleData: []
       };
 
@@ -427,41 +428,94 @@ async function readActiveSelection() {
         console.warn("Could not load cell values:", cellErr);
       }
 
+      // DEEP DATA PROFILING (Ground Truth Inspection)
       try {
-        const topRange = sheet.getRange("A1:AZ20");
-        topRange.load(["values", "text"]);
+        const used = sheet.getUsedRange();
+        used.load(["address", "rowCount", "columnCount", "rowIndex", "columnIndex"]);
         await context.sync();
 
-        if (topRange.values && topRange.values.length > 0) {
+        sheetOverview.usedRangeAddress = used.address;
+        sheetOverview.rowCount = used.rowCount;
+        sheetOverview.columnCount = used.columnCount;
+
+        const maxScanRows = Math.min(used.rowCount || 25, 25);
+        const maxScanCols = Math.min(used.columnCount || 26, 26);
+        const startRow = used.rowIndex || 0;
+        const startCol = used.columnIndex || 0;
+
+        const dataBlock = sheet.getRangeByIndexes(startRow, startCol, maxScanRows, maxScanCols);
+        dataBlock.load(["values", "text"]);
+        await context.sync();
+
+        if (dataBlock.values && dataBlock.values.length > 0) {
+          // Identify Header Row (row with highest number of non-empty strings)
           let bestRow = 0;
           let maxCount = 0;
-          for (let r = 0; r < Math.min(5, topRange.values.length); r++) {
-            const count = topRange.values[r].filter(v => v !== null && String(v).trim().length > 0).length;
+          for (let r = 0; r < Math.min(5, dataBlock.values.length); r++) {
+            const count = dataBlock.values[r].filter(v => v !== null && String(v).trim().length > 0).length;
             if (count > maxCount) {
               maxCount = count;
               bestRow = r;
             }
           }
 
-          sheetOverview.headers = topRange.values[bestRow]
-            .map(v => String(v ?? "").trim())
-            .filter(v => v.length > 0);
+          const headers = [];
+          const columnProfiles = [];
+
+          for (let c = 0; c < maxScanCols; c++) {
+            const colLetter = indexToColLetter(startCol + c);
+            const rawHeader = dataBlock.values[bestRow]?.[c];
+            const headerName = (rawHeader !== null && rawHeader !== undefined) ? String(rawHeader).trim() : "";
+            headers.push(headerName || `Kolom ${colLetter}`);
+
+            const samples = [];
+            let hasMultiSpaces = false;
+            let hasDatePattern = false;
+            let numericCount = 0;
+
+            for (let r = bestRow + 1; r < dataBlock.values.length; r++) {
+              const textVal = String(dataBlock.text?.[r]?.[c] ?? dataBlock.values?.[r]?.[c] ?? "").trim();
+              if (textVal && textVal !== '""' && textVal !== "#NAME?") {
+                samples.push(textVal);
+                if (/\s{2,}|\t/.test(textVal)) hasMultiSpaces = true;
+                if (/\d{4}[-/.]\d{1,2}[-/.]\d{1,2}/.test(textVal)) hasDatePattern = true;
+                if (!isNaN(parseFloat(textVal.replace(/[%$,]/g, "")))) numericCount++;
+              }
+            }
+
+            let type = "Teks / Umum";
+            if (hasDatePattern) type = "Rentang Tanggal (Date Range)";
+            else if (hasMultiSpaces) type = "Teks Majemuk dengan Spasi Ganda/Lebar (\\s{2,})";
+            else if (numericCount > 0 && numericCount >= samples.length * 0.7) type = "Angka / Metrik Numerik";
+
+            columnProfiles.push({
+              letter: colLetter,
+              header: headerName || `Kolom ${colLetter}`,
+              type,
+              hasMultiSpaces,
+              hasDatePattern,
+              samples: samples.slice(0, 8)
+            });
+          }
+
+          sheetOverview.headers = headers;
+          sheetOverview.columnProfiles = columnProfiles;
 
           sheetOverview.sampleData = [];
-          for (let r = bestRow + 1; r < topRange.values.length; r++) {
-            const rowText = topRange.text?.[r] || topRange.values[r];
+          for (let r = bestRow + 1; r < dataBlock.values.length; r++) {
+            const rowText = dataBlock.text?.[r] || dataBlock.values[r];
             if (rowText && rowText.some(v => v !== null && String(v).trim().length > 0)) {
               const rowObj = {};
-              for (let c = 0; c < Math.min(rowText.length, sheetOverview.headers.length); c++) {
-                const headerName = sheetOverview.headers[c] || indexToColLetter(c);
-                rowObj[`${indexToColLetter(c)} (${headerName})`] = rowText[c] ?? "";
+              for (let c = 0; c < Math.min(rowText.length, headers.length); c++) {
+                const hName = headers[c] || indexToColLetter(startCol + c);
+                rowObj[`${indexToColLetter(startCol + c)} (${hName})`] = rowText[c] ?? "";
               }
               sheetOverview.sampleData.push(rowObj);
             }
           }
         }
       } catch (headerErr) {
-        console.warn("Could not read headers safely:", headerErr);
+        console.warn("Could not inspect sheet data deeply:", headerErr);
       }
 
       currentSelection.sheetOverview = sheetOverview;

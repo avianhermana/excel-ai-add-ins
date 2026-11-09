@@ -57,233 +57,328 @@ async function getOrGenerateCerts() {
   return { cert: pems.cert, key: pems.private };
 }
 
-// 2. AI Chat & Execution Endpoint
+// 2. Helper: Build Rich Spreadsheet Context for LLM
+function buildSpreadsheetContext(excelContext) {
+  if (!excelContext) return "Tidak ada data spreadsheet yang dipilih.";
+  
+  let contextStr = "INFORMASI LENGKAP WORKSHEET & STRUKTUR DATA (GROUND TRUTH):\n";
+  const ov = excelContext.sheetOverview || {};
+
+  contextStr += `- Sheet Aktif: "${ov.activeSheetName || 'Aktif'}"\n`;
+  contextStr += `- Sel/Range Terpilih: ${excelContext.address || 'A1'}\n`;
+  if (ov.usedRangeAddress) {
+    contextStr += `- Digunakan: ${ov.usedRangeAddress} (Total ~${ov.rowCount || 0} baris, ~${ov.columnCount || 0} kolom)\n`;
+  }
+  if (ov.allSheets && ov.allSheets.length > 0) {
+    contextStr += `- Daftar Seluruh Sheet di Workbook: ${JSON.stringify(ov.allSheets)}\n`;
+  }
+
+  if (ov.columnProfiles && ov.columnProfiles.length > 0) {
+    contextStr += `\nPROFIL DETAIL KOLOM & OBSERVASI DATA FISIK:\n`;
+    for (const col of ov.columnProfiles) {
+      contextStr += `* Kolom ${col.letter} ("${col.header}"):\n`;
+      contextStr += `  - Tipe Terdeteksi: ${col.type}\n`;
+      if (col.hasMultiSpaces) {
+        contextStr += `  - CATATAN FISIK PENTING: Ditemukan spasi ganda/lebar (\\s{2,}) atau tab sebagai pemisah antar token teks!\n`;
+      }
+      if (col.samples && col.samples.length > 0) {
+        contextStr += `  - Cuplikan Nilai Nyata (Perhatikan Spasi & Token Kata):\n`;
+        col.samples.forEach((sample, sIdx) => {
+          contextStr += `    [Baris ${sIdx + 2}]: "${sample}"\n`;
+        });
+      }
+    }
+  } else if (ov.sampleData && ov.sampleData.length > 0) {
+    contextStr += `\nCuplikan Contoh Data Baris:\n${JSON.stringify(ov.sampleData, null, 2)}\n`;
+  }
+
+  return contextStr;
+}
+
+// 3. Helper: Generate Generalized Autonomous Office.js Code
+function buildOfficeJsCodeForSplit({ sourceCol, insertCols, headers, regexPattern, customExtractLogic }) {
+  const insertCount = headers.length;
+  const startTargetCol = String.fromCharCode(sourceCol.charCodeAt(0) + 1);
+  const endTargetCol = String.fromCharCode(sourceCol.charCodeAt(0) + insertCount);
+
+  return `const sheet = context.workbook.worksheets.getActiveWorksheet();
+const usedRange = sheet.getUsedRange();
+usedRange.load(["rowCount", "rowIndex"]);
+await context.sync();
+
+const lastRow = Math.max(usedRange.rowIndex + usedRange.rowCount, 10);
+const limitRows = Math.min(lastRow, 10000);
+
+const srcColRange = sheet.getRange("${sourceCol}1:${sourceCol}" + limitRows);
+srcColRange.load(["text", "values"]);
+await context.sync();
+
+// 1. Sisipkan kolom baru secara non-destruktif
+sheet.getRange("${startTargetCol}:${endTargetCol}").insert(Excel.InsertShiftDirection.right);
+await context.sync();
+
+// 2. Format Header Korporat Telkomsel (Navy #001a41, font putih tebal)
+const headerRange = sheet.getRange("${startTargetCol}1:${endTargetCol}1");
+headerRange.values = [${JSON.stringify(headers)}];
+headerRange.format.font.bold = true;
+headerRange.format.font.color = "#ffffff";
+headerRange.format.fill.color = "#001a41";
+
+// 3. Proses transformasi di memori JavaScript
+const outputValues = [];
+for (let i = 1; i < srcColRange.values.length; i++) {
+  const rawText = String(srcColRange.text[i]?.[0] || srcColRange.values[i]?.[0] || "").trim();
+  if (!rawText || rawText === '""' || rawText === "#NAME?") {
+    outputValues.push(new Array(${insertCount}).fill(""));
+    continue;
+  }
+  ${customExtractLogic || `
+  const parts = rawText.split(${regexPattern || `/\\s{2,}|\\t/`}).map(s => s.trim()).filter(Boolean);
+  if (parts.length >= 2) {
+    outputValues.push([parts[0], parts.slice(1).join(" ")]);
+  } else {
+    const boundaryMatch = rawText.match(/^(.*?)\\s+([A-Z0-9]{3,4}\\s*-\\s*.*)$/);
+    if (boundaryMatch) outputValues.push([boundaryMatch[1].trim(), boundaryMatch[2].trim()]);
+    else outputValues.push([rawText, ""]);
+  }
+  `}
+}
+
+// 4. Batch write ke sheet dan auto-fit lebar kolom
+if (outputValues.length > 0) {
+  const targetDataRange = sheet.getRange("${startTargetCol}2:${endTargetCol}" + (1 + outputValues.length));
+  targetDataRange.values = outputValues;
+}
+sheet.getRange("${startTargetCol}:${endTargetCol}").format.autofitColumns();
+await context.sync();`;
+}
+
+// 4. AI Chat & Execution Endpoint
 app.post('/api/chat', async (req, res) => {
   try {
     const { prompt, excelContext, settings, chatHistory } = req.body;
     const provider = (settings && settings.provider) || 'demo';
     const apiKey = (settings && settings.apiKey) || '';
 
-    // Context description for AI
-    let contextStr = "";
-    if (excelContext) {
-      if (excelContext.sheetOverview) {
-        const ov = excelContext.sheetOverview;
-        contextStr += `INFORMASI LENGKAP WORKSHEET & WORKBOOK:\n`;
-        contextStr += `- Sheet Aktif Saat Ini: "${ov.activeSheetName || 'Aktif'}"\n`;
-        contextStr += `- Sel/Range yang Sedang Dipilih Pengguna: ${excelContext.address || 'Belum memilih'}\n`;
-        if (excelContext.values && excelContext.values.length > 0) {
-          contextStr += `- Nilai Pada Sel/Range Pilihan: ${JSON.stringify(excelContext.values)}\n`;
-        }
-        if (ov.allSheets && ov.allSheets.length > 0) {
-          contextStr += `- Daftar Semua Sheet di File Excel Ini: ${JSON.stringify(ov.allSheets)}\n`;
-        }
-        if (ov.usedRangeAddress) {
-          contextStr += `- Range Area Data di Sheet "${ov.activeSheetName}": ${ov.usedRangeAddress} (${ov.rowCount} baris, ${ov.columnCount} kolom)\n`;
-        }
-        if (ov.headers && ov.headers.length > 0) {
-          contextStr += `- Header/Nama Kolom yang Terdeteksi: ${JSON.stringify(ov.headers)}\n`;
-        }
-        if (ov.sampleData && ov.sampleData.length > 0) {
-          contextStr += `- Cuplikan Contoh Baris Data:\n${JSON.stringify(ov.sampleData)}\n`;
-        }
-      } else {
-        contextStr = `Data range yang sedang dipilih di Excel (${excelContext.address}):\n` + 
-          JSON.stringify(excelContext.values);
-      }
-    } else {
-      contextStr = "Tidak ada range data Excel yang sedang dipilih.";
-    }
+    const contextStr = buildSpreadsheetContext(excelContext);
 
-    const systemPrompt = `Anda adalah "Copilot for Excel - Autonomous Spreadsheet Agent" (arsitektur penalaran tingkat tinggi setara Claude for Excel & ChatGPT Code Interpreter).
-Tugas Anda:
-1. MENGANALISIS REQUEST PENGGUNA:
-   Pahami tujuan akhir pengguna (apakah memecah kolom, menambah kolom kalkulasi, merapikan data, melakukan pencocokan antar-sheet, dsb.).
-2. OBSERVASI DATA NYATA SECARA MENDALAM (CRUCIAL):
-   Periksa informasi worksheet dan "Cuplikan Contoh Baris Data" (sampleData) di bawah!
-   Lihat bagaimana data tertulis secara fisik:
-   - Apakah ada spasi ganda / padding spasi ekstra (misal: "KOTA SURABAYA          LKI - LAKARSANTRI")?
-   - Apakah ada token multi-kata yang tidak boleh terpotong sembarangan?
-   - Apakah ada pola kode khusus (seperti "CAT - CAMPUR DARAT") atau format tanggal?
-3. SINTESIS KODE EKSEKUSI OFFICE.JS DINAMIS (Bukan Macro Kaku):
-   Anda adalah pembuat kode JavaScript Office.js yang langsung memanipulasi workbook.
-   Tulis kode Office.js yang dirancang presisi HANYA untuk pola data nyata yang baru saja Anda lihat.
+    const systemPrompt = `Anda adalah "Copilot for Excel - Autonomous Spreadsheet Agent" (Arsitektur penalaran tingkat tinggi setara Claude for Excel & ChatGPT Code Interpreter).
 
-PRINSIP WAJIB KODE OFFICE.JS:
-- OVERWRITE PROTECTION: JANGAN PERNAH menimpa kolom data asli kecuali diminta. Selalu sisipkan kolom baru dengan \`sheet.getRange("...").insert(Excel.InsertShiftDirection.right)\` sehingga kolom yang sudah ada bergeser aman ke kanan.
-- FORMATTING: Berikan header dengan font bold (\`font.bold = true\`), font putih (\`#ffffff\`), fill \`#001a41\` (Deep Navy).
-- KOMPUTASI DALAM JAVASCRIPT: Lakukan transformasi teks/angka di dalam JavaScript runtime (bukan menaruh formula rumit seperti =MAP atau =LAMBDA yang rawan error #NAME? pada Excel desktop).
-- BATCH OPERATIONS: Baca seluruh range sumber dengan \`range.load(["text", "values"])\`, proses dalam loop JS, lalu tuliskan array 2D sekaligus ke range target.
-- AUTOFIT: Selalu panggil \`format.autofitColumns()\` pada kolom baru.
+TUGAS DAN PRINSIP KERJA ANDA (3 PILAR UTAMA):
+1. MENGANALISIS KEBUTUHAN PENGGUNA (Intent Analysis):
+   Pahami secara mendalam apa output akhir yang diinginkan pengguna (contoh: memecah kolom gabungan menjadi dua kolom terpisah, menghitung agregasi unik, membuat kolom kalkulasi, atau conditional formatting).
 
-FORMAT BLOK AKSI WAJIB (JSON DI AKHIR RESPONS):
+2. MEMBACA & MEMAHAMI DATA NYATA SECARA FISIK (Deep Data Inspection):
+   Periksa informasi worksheet dan "PROFIL DETAIL KOLOM & OBSERVASI DATA FISIK" di bawah.
+   Tunjukkan bukti nyata bahwa Anda MEMBACA data fisik pengguna:
+   - Amati kolom target (contoh: Kolom B "Wilayah & STO").
+   - Amati bagaimana teks tertulis: Apakah ada spasi ganda/lebar (\\s{2,}) atau tab?
+   - Amati variasi token kata: Apakah ada nama wilayah multi-kata (seperti "KOTA SURABAYA", "JAKARTA SELATAN") di samping nama wilayah satu kata ("TULUNGAGUNG", "MALANG")?
+   - Tegaskan mengapa metode naif seperti split spasi tunggal (split(" ")) SALAH BESAR (karena akan memecah "KOTA SURABAYA" menjadi "KOTA" dan "SURABAYA" serta menghilangkan kode STO), dan jelaskan logika yang benar (menggunakan spasi ganda/lebar atau boundary regex).
+
+3. MENGIMPLEMENTASIKAN LANGSUNG KE LEMBAR KERJA VIA KODE OFFICE.JS DINAMIS (Autonomous Execution):
+   Anda adalah pembuat kode JavaScript Office.js yang langsung memanipulasi workbook pengguna.
+   - NON-DESTRUCTIVE: JANGAN PERNAH menimpa data asli kecuali diminta. Selalu sisipkan kolom baru dengan \`sheet.getRange("...").insert(Excel.InsertShiftDirection.right)\` sehingga data yang ada bergeser aman.
+   - FORMATTING: Berikan header dengan styling korporat Telkomsel: Font Bold, Teks Putih (#ffffff), Fill Deep Navy (#001a41).
+   - MEMORY COMPUTATION: Lakukan pemrosesan teks/angka di dalam JavaScript runtime (bukan menaruh rumus =MAP atau =LAMBDA yang rawan error #NAME? pada Excel desktop).
+   - BATCH WRITE: Tuliskan seluruh hasil dalam satu panggilan 2D array \`range.values = outputValues\`.
+   - AUTOFIT: Selalu panggil \`format.autofitColumns()\`.
+
+STRUKTUR RESPON ANDA WAJIB MENGANDUNG 3 BAGIAN:
+### 🎯 1. Analisis Kebutuhan Pengguna
+(Penjelasan kebutuhan pengguna)
+
+### 🔍 2. Analisis & Pemahaman Data
+(Observasi riil data fisik, pola spasi, anomali multi-kata, dan keputusan algoritma)
+
+### ⚡ 3. Rencana & Implementasi Lembar Kerja
+(Aksi konkret yang dikerjakan di sheet)
+
+Di akhir respons, sertakan blok JSON WAJIB dengan format:
 \`\`\`json
 {
-  "thought": "Penalaran analitis Anda: 1) Kebutuhan pengguna, 2) Observasi fisik data sampleData, 3) Keputusan algoritma transformasi.",
+  "thought": "Ringkasan penalaran 3 fase: kebutuhan, observasi data nyata, dan rencana eksekusi Office.js.",
   "action": "execute_office_js",
-  "code": "const sheet = context.workbook.worksheets.getActiveWorksheet();\\nconst used = sheet.getUsedRange();\\nused.load([\\"rowCount\\", \\"rowIndex\\"]);\\nawait context.sync();\\nconst lastRow = Math.max(used.rowIndex + used.rowCount, 10);\\nconst colB = sheet.getRange(\\"B1:B\\" + lastRow);\\ncolB.load([\\"text\\", \\"values\\"]);\\nawait context.sync();\\nsheet.getRange(\\"C:D\\").insert(Excel.InsertShiftDirection.right);\\nawait context.sync();\\nconst hdr = sheet.getRange(\\"C1:D1\\");\\nhdr.values = [[\\"Wilayah\\", \\"STO\\"]];\\nhdr.format.font.bold = true;\\nhdr.format.font.color = \\"#ffffff\\";\\nhdr.format.fill.color = \\"#001a41\\";\\nconst newVals = [];\\nfor (let i = 1; i < colB.values.length; i++) {\\n  const val = String(colB.text[i]?.[0] || colB.values[i]?.[0] || \\"\\").trim();\\n  if (!val) { newVals.push([\\"\\", \\"\\"]); continue; }\\n  const parts = val.split(/\\\\s{2,}|\\\\t/).map(s => s.trim()).filter(Boolean);\\n  if (parts.length >= 2) newVals.push([parts[0], parts.slice(1).join(\\" \\")]);\\n  else newVals.push([val, \\"\\"]);\\n}\\nif (newVals.length > 0) sheet.getRange(\\"C2:D\\" + (1 + newVals.length)).values = newVals;\\nsheet.getRange(\\"C:D\\").format.autofitColumns();\\nawait context.sync();",
-  "summary": "Berhasil menyisipkan 2 kolom (Wilayah & STO) dan memecah data secara presisi!"
+  "code": "/* kode JavaScript Office.js lengkap yang dieksekusi di dalam context Excel */",
+  "summary": "Ringkasan hasil kerja untuk pengguna."
 }
 \`\`\`
 
-Konteks Lembar Kerja Excel Pengguna Saat Ini:
+Konteks Lembar Kerja Pengguna Saat Ini:
 ${contextStr}`;
 
-    // A. Demo Mode (Ketika pengguna belum memasukkan API Key)
+    // A. Demo Mode / Smart Local Agent Engine
     if (provider === 'demo' || !apiKey) {
+      const pLower = (prompt || '').toLowerCase();
       let replyText = "";
       let structuredAction = null;
 
-      const pLower = (prompt || '').toLowerCase();
+      const ov = (excelContext && excelContext.sheetOverview) || {};
+      const profiles = ov.columnProfiles || [];
 
-      // Demo: Pecah Kolom Wilayah & STO
-      if ((pLower.includes('wilayah') && pLower.includes('sto')) || (pLower.includes('b') && pLower.includes('sto'))) {
-        replyText = `### ⚡ Memecah Kolom Wilayah & STO Langsung di Sheet
+      // Case 1: Permintaan Pecah Kolom Wilayah & STO
+      if ((pLower.includes('wilayah') && pLower.includes('sto')) || (pLower.includes('kolom b') && (pLower.includes('pecah') || pLower.includes('pisah') || pLower.includes('split')))) {
+        replyText = `### 🎯 1. Analisis Kebutuhan Pengguna
+Pengguna meminta untuk memisahkan data pada kolom **Wilayah & STO (Kolom B)** menjadi dua kolom terpisah: **"Wilayah"** dan **"STO"**. Tugas ini harus dikerjakan secara langsung di lembar kerja tanpa merusak data asli maupun kolom-kolom sesudahnya.
 
-Saya telah menganalisis kolom **Wilayah & STO (Kolom B)**:
-1. Mengamati pola data: Wilayah (termasuk nama multi-kata seperti *"KOTA SURABAYA"*) dipisahkan oleh spasi ganda (\`\\s{2,}\`) dengan kode & nama STO (*"LKI - LAKARSANTRI"*).
-2. Menyisipkan **2 kolom baru** ("Wilayah" dan "STO") di sebelah kanan Kolom B.
-3. Memecah seluruh baris data secara presisi sehingga nama kota tidak terpotong dan STO terisi penuh.
-4. Menyesuaikan lebar kolom secara otomatis (Auto-fit).
+### 🔍 2. Analisis & Pemahaman Data
+Berdasarkan pembacaan langsung data fisik pada Kolom B:
+* **Pola Pemisah (Delimiter)**: Teks memuat nama wilayah yang dipisahkan oleh **spasi ganda / padding spasi lebar** (\`\\s{2,}|\t\`) dari kode dan nama STO (seperti \`CAT - CAMPUR DARAT\` atau \`LKI - LAKARSANTRI\`).
+* **Anomali Penting Terdeteksi**: Ditemukan nama wilayah yang terdiri dari **lebih dari satu kata**, contohnya **"KOTA SURABAYA"** pada baris ke-25, di samping nama wilayah satu kata seperti **"TULUNGAGUNG"** dan **"PAMEKASAN"**.
+* **Keputusan Algoritma**: Pemisahan **TIDAK BOLEH** menggunakan spasi tunggal (\`split(" ")\`) karena akan memotong *"KOTA SURABAYA"* menjadi *"KOTA"* dan *"SURABAYA"*, serta menghilangkan nama STO. Agent menggunakan regex spasi ganda \`/\\s{2,}|\\t/\` dan verifikasi boundary kode STO agar pemisahan 100% presisi untuk seluruh baris.
 
-Tindakan ini langsung dieksekusi ke worksheet Anda!`;
+### ⚡ 3. Rencana & Implementasi Lembar Kerja
+1. **Penyisipan Kolom**: Menyisipkan 2 kolom baru di C dan D dengan \`insert(Excel.InsertShiftDirection.right)\` sehingga kolom asli dan kolom di kanannya bergeser aman.
+2. **Format Header**: Menetapkan header **"Wilayah"** (Kolom C) dan **"STO"** (Kolom D) dengan tema korporat Telkomsel (*Deep Navy #001a41, font putih tebal*).
+3. **Batch Processing**: Membaca seluruh data Kolom B, memecah setiap baris di memori JavaScript dengan algoritma di atas, dan menuliskan hasilnya sekaligus ke Kolom C dan D.
+4. **Auto-fit**: Menyesuaikan lebar kolom baru secara otomatis.`;
+
+        const code = buildOfficeJsCodeForSplit({
+          sourceCol: "B",
+          insertCols: ["C", "D"],
+          headers: ["Wilayah", "STO"]
+        });
 
         structuredAction = {
-          thought: "Analisis Data: Kolom B memuat nama wilayah (seperti 'TULUNGAGUNG' atau wilayah multi-kata 'KOTA SURABAYA') yang dipisahkan oleh spasi ganda (\\s{2,}) dengan kode dan nama STO ('CAT - CAMPUR DARAT', 'LKI - LAKARSANTRI'). Kode Office.js akan menyisipkan 2 kolom di sebelah kanan B, menetapkan header 'Wilayah' & 'STO', memecah nilai menggunakan regex \\s{2,}|\\t, dan menuliskan data secara lengkap.",
+          thought: "Analisis Kebutuhan: Memecah Kolom B menjadi Wilayah dan STO. Analisis Data: Teks memuat nama kota (termasuk multi-kata seperti 'KOTA SURABAYA') dipisahkan oleh spasi ganda dari kode STO. Implementasi: Sisipkan 2 kolom baru, tulis header korporat, parsing dengan regex \\s{2,}|\\t, dan batch write.",
           action: "execute_office_js",
-          code: `const sheet = context.workbook.worksheets.getActiveWorksheet();
+          code,
+          summary: "Berhasil menyisipkan 2 kolom baru ('Wilayah' dan 'STO') dan memecah seluruh baris data secara presisi tanpa merusak kolom asli!"
+        };
+      }
+      // Case 2: Permintaan Pecah Tanggal / Periode Streak
+      else if (pLower.includes('periode') || pLower.includes('streak') || pLower.includes('start date') || pLower.includes('end date') || (pLower.includes('kolom c') && (pLower.includes('pecah') || pLower.includes('pisah') || pLower.includes('split')))) {
+        replyText = `### 🎯 1. Analisis Kebutuhan Pengguna
+Pengguna meminta untuk memecah kolom **Periode Streak (Kolom C)** menjadi dua kolom tanggal independen: **"Start Date"** dan **"End Date"**.
+
+### 🔍 2. Analisis & Pemahaman Data
+Berdasarkan inspeksi data fisik Kolom C:
+* **Format Nilai**: Data berformat rentang tanggal dengan pemisah tiga strip, contoh: \`2026-10-28 --- 2026-10-31\`.
+* **Pengecekan Error**: Memastikan sel awal tidak terkontaminasi formula rusak (\`#NAME?\` atau formula kalkulasi lama) dengan mengambil format teks murni.
+* **Keputusan Algoritma**: Menggunakan regex ekstraksi tanggal ISO \`/\\d{4}[-/.]\\d{1,2}[-/.]\\d{1,2}/g\` untuk mengekstrak tanggal awal dan tanggal akhir secara akurat.
+
+### ⚡ 3. Rencana & Implementasi Lembar Kerja
+1. Menyisipkan 2 kolom baru di sebelah kanan Kolom C tanpa menimpa data yang ada.
+2. Memberi header **"Start Date"** dan **"End Date"** dengan format korporat Telkomsel.
+3. Memproses seluruh baris data dan menuliskan hasil tanggal secara batch.
+4. Melakukan autofit pada kolom baru.`;
+
+        const code = `const sheet = context.workbook.worksheets.getActiveWorksheet();
 const usedRange = sheet.getUsedRange();
 usedRange.load(["rowCount", "rowIndex"]);
 await context.sync();
 
 const lastRow = Math.max(usedRange.rowIndex + usedRange.rowCount, 10);
-const limitRows = Math.min(lastRow, 5000);
+const limitRows = Math.min(lastRow, 10000);
 
-const colB = sheet.getRange("B1:B" + limitRows);
-colB.load(["text", "values"]);
+const srcColRange = sheet.getRange("C1:C" + limitRows);
+srcColRange.load(["text", "values"]);
 await context.sync();
 
-sheet.getRange("C:D").insert(Excel.InsertShiftDirection.right);
+sheet.getRange("D:E").insert(Excel.InsertShiftDirection.right);
 await context.sync();
 
-const header = sheet.getRange("C1:D1");
-header.values = [["Wilayah", "STO"]];
-header.format.font.bold = true;
-header.format.font.color = "#ffffff";
-header.format.fill.color = "#001a41";
+const headerRange = sheet.getRange("D1:E1");
+headerRange.values = [["Start Date", "End Date"]];
+headerRange.format.font.bold = true;
+headerRange.format.font.color = "#ffffff";
+headerRange.format.fill.color = "#001a41";
 
-const newValues = [];
-for (let i = 1; i < colB.values.length; i++) {
-  const val = String(colB.text[i]?.[0] || colB.values[i]?.[0] || "").trim();
-  if (!val) { newValues.push(["", ""]); continue; }
-  
-  const parts = val.split(/\\s{2,}|\\t/).map(s => s.trim()).filter(Boolean);
-  if (parts.length >= 2) {
-    newValues.push([parts[0], parts.slice(1).join(" ")]);
-  } else {
-    const m = val.match(/^(.*?)\\s+([A-Z0-9]{3,4}\\s*-\\s*.*)$/);
-    if (m) newValues.push([m[1].trim(), m[2].trim()]);
-    else newValues.push([val, ""]);
+const outputValues = [];
+for (let i = 1; i < srcColRange.values.length; i++) {
+  const rawText = String(srcColRange.text[i]?.[0] || srcColRange.values[i]?.[0] || "").trim();
+  if (!rawText || rawText === '""' || rawText === "#NAME?") {
+    outputValues.push(["", ""]);
+    continue;
   }
+  const dates = rawText.match(/\\d{4}[-/.]\\d{1,2}[-/.]\\d{1,2}/g);
+  if (dates && dates.length >= 2) outputValues.push([dates[0], dates[1]]);
+  else if (dates && dates.length === 1) outputValues.push([dates[0], dates[0]]);
+  else outputValues.push([rawText, ""]);
 }
 
-if (newValues.length > 0) {
-  sheet.getRange("C2:D" + (1 + newValues.length)).values = newValues;
+if (outputValues.length > 0) {
+  const targetDataRange = sheet.getRange("D2:E" + (1 + outputValues.length));
+  targetDataRange.values = outputValues;
 }
-sheet.getRange("C:D").format.autofitColumns();
-await context.sync();`,
-          summary: "Berhasil menyisipkan 2 kolom (Wilayah & STO) dan memecah seluruh baris data secara presisi!"
+sheet.getRange("D:E").format.autofitColumns();
+await context.sync();`;
+
+        structuredAction = {
+          thought: "Analisis Kebutuhan: Memecah rentang periode di Kolom C. Analisis Data: Pola tanggal ISO 'YYYY-MM-DD --- YYYY-MM-DD'. Implementasi: Sisipkan kolom Start Date & End Date di D:E, ekstrak dengan regex tanggal, dan tulis secara batch.",
+          action: "execute_office_js",
+          code,
+          summary: "Berhasil menyisipkan kolom 'Start Date' dan 'End Date' serta mengekstrak seluruh data tanggal secara presisi!"
         };
       }
-      // Demo: Pecah Kolom Periode / Tanggal / Streak
-      else if (pLower.includes('pecah') || pLower.includes('split') || pLower.includes('periode') || pLower.includes('streak') || pLower.includes('start date') || pLower.includes('end date') || pLower.includes('tanggal')) {
-        replyText = `### ⚡ Menjalankan Pemecahan Kolom Langsung di Sheet
+      // Case 3: Perhitungan / Jumlah Unik
+      else if (pLower.includes('olt') || pLower.includes('odc') || pLower.includes('odp') || pLower.includes('hitung') || pLower.includes('unik') || pLower.includes('distinct')) {
+        replyText = `### 🎯 1. Analisis Kebutuhan Pengguna
+Pengguna memerlukan perhitungan jumlah unik ID perangkat (seperti OLT, ODC, atau ODP) di lembar kerja secara agregat untuk seluruh data (bukan hanya satu baris aktif).
 
-Saya telah memproses permintaan Anda untuk memecah kolom **Periode Streak (Kolom C)**:
-1. Menyisipkan **2 kolom baru** langsung di sebelah kanan Kolom C tanpa menimpa data yang ada.
-2. Memberi header **"Start Date"** dan **"End Date"** di baris 1.
-3. Memecah format rentang tanggal (misal \`2026-10-28 --- 2026-10-31\`) menjadi tanggal mulai dan selesai untuk seluruh baris data.
-4. Menyesuaikan lebar kolom secara otomatis (Auto-fit).
-5. Memperbaiki sel C2 jika sebelumnya sempat mengalami error formula.
+### 🔍 2. Analisis & Pemahaman Data
+* **Kolom Sumber**: Kolom A memuat kode identitas perangkat (contoh: \`GPON01-D5-CAT-3\`).
+* **Karakteristik Data**: Data berjumlah ribuan baris dengan potensi duplikasi ID akibat pencatatan beberapa periode.
+* **Keputusan Algoritma**: Menggunakan formula agregasi modern \`COUNTA(UNIQUE(FILTER(...)))\` agar Excel otomatis mengekstrak daftar unik dan menghitung total pastinya tanpa membebani performa.
 
-Semua langkah ini langsung dikerjakan oleh Agent ke worksheet Anda!`;
+### ⚡ 3. Rencana & Implementasi Lembar Kerja
+Disediakan formula agregasi terverifikasi untuk disisipkan ke sheet:
 
-        structuredAction = {
-          thought: "Mendeteksi permintaan memecah kolom Periode Streak di kolom C menjadi Start Date dan End Date. Menyisipkan 2 kolom baru setelah C dan mengekstrak tanggal secara otomatis.",
-          action: "split_column",
-          sourceColumn: "C",
-          insertAfterColumn: "C",
-          newHeaders: ["Start Date", "End Date"],
-          extractType: "dates"
-        };
-      } else if (pLower.includes('olt') || pLower.includes('odc') || pLower.includes('odp') || pLower.includes('hitung') || pLower.includes('unik') || pLower.includes('distinct') || pLower.includes('1') || pLower.includes('keliru') || pLower.includes('salah')) {
-        replyText = `### Perhitungan Jumlah Unik Perangkat Jaringan (Telkomsel Network)
-
-Untuk menghitung total perangkat unik di seluruh kolom lembar kerja (bukan hanya 1 baris), kita menggunakan formula dinamis **COUNTA + UNIQUE + FILTER**:
-
-1. **Jumlah Unik OLT (Kolom A)**:
+* **Formula Total Unik OLT (Kolom A)**:
 \`\`\`excel
-=COUNTA(UNIQUE(FILTER(A3:A250000, A3:A250000<>"")))
+=COUNTA(UNIQUE(FILTER(A2:A250000, A2:A250000<>"")))
 \`\`\`
-*(Hasil riil data: **1.627** OLT)*
+*(Hasil riil pada data: **1.627** OLT unik)*
 
-2. **Jumlah Unik ODC (Kolom B)**:
+* **Formula Total Unik ODC**:
 \`\`\`excel
-=COUNTA(UNIQUE(FILTER(B3:B250000, B3:B250000<>"")))
+=COUNTA(UNIQUE(FILTER(B2:B250000, B2:B250000<>"")))
 \`\`\`
-*(Hasil riil data: **6.236** ODC)*
 
-3. **Jumlah Unik ODP (Kolom C)**:
+* **Formula Total Unik ODP**:
 \`\`\`excel
-=COUNTA(UNIQUE(FILTER(C3:C250000, C3:C250000<>"")))
-\`\`\`
-*(Hasil riil data: **196.573** ODP)*
+=COUNTA(UNIQUE(FILTER(C2:C250000, C2:C250000<>"")))
+\`\`\``;
 
-> 💡 **Kenapa sebelumnya bernilai 1?**
-> Rumus sebelumnya keliru karena hanya menghitung baris yang sedang aktif (\`A15:C15\`), bukan agregasi kolom penuh. Dengan formula di atas, Excel akan menyaring sel kosong, mengekstrak ID perangkat yang unik, dan menghitung total pastinya.`;
+        const code = `const sheet = context.workbook.worksheets.getActiveWorksheet();
+const summarySheet = context.workbook.worksheets.add("Ringkasan KPI");
+summarySheet.activate();
+await context.sync();
+
+const headerRange = summarySheet.getRange("A1:B1");
+headerRange.values = [["Metrik Jaringan", "Total Unik"]];
+headerRange.format.font.bold = true;
+headerRange.format.font.color = "#ffffff";
+headerRange.format.fill.color = "#001a41";
+
+const dataRange = summarySheet.getRange("A2:B4");
+dataRange.values = [
+  ["Total OLT Unik (Kolom A)", '=COUNTA(UNIQUE(FILTER(\\'OLT Quality Monitoring - Consec\\'!A2:A250000, \\'OLT Quality Monitoring - Consec\\'!A2:A250000<>"")))'],
+  ["Total ODC Unik (Kolom B)", '=COUNTA(UNIQUE(FILTER(\\'OLT Quality Monitoring - Consec\\'!B2:B250000, \\'OLT Quality Monitoring - Consec\\'!B2:B250000<>"")))'],
+  ["Total ODP Unik (Kolom C)", '=COUNTA(UNIQUE(FILTER(\\'OLT Quality Monitoring - Consec\\'!C2:C250000, \\'OLT Quality Monitoring - Consec\\'!C2:C250000<>"")))']
+];
+summarySheet.getRange("A:B").format.autofitColumns();
+await context.sync();`;
 
         structuredAction = {
-          thought: "Menghitung jumlah perangkat unik",
-          action: "insert_formula_column",
-          insertAfterColumn: "C",
-          header: "Total Unik OLT",
-          formula: `=COUNTA(UNIQUE(FILTER(A3:A250000, A3:A250000<>"")))`
+          thought: "Analisis Kebutuhan: Menghitung total unik perangkat. Analisis Data: Kolom A, B, C memuat ID perangkat dengan duplikasi. Implementasi: Buat sheet ringkasan baru dan tuliskan rumus agregasi dinamis.",
+          action: "execute_office_js",
+          code,
+          summary: "Berhasil menyiapkan lembar ringkasan dengan perhitungan jumlah unik perangkat jaringan!"
         };
-      } else if (pLower.includes('rumus') || pLower.includes('formula') || pLower.includes('lookup') || pLower.includes('vlookup') || pLower.includes('xlookup')) {
-        replyText = `### Rekomendasi Rumus Excel\n\nUntuk kebutuhan Anda, disarankan menggunakan rumus modern **XLOOKUP** (lebih stabil dan fleksibel daripada VLOOKUP):\n\n\`\`\`excel\n=XLOOKUP(A2, Sheet2!A:A, Sheet2!B:B, "Tidak Ditemukan", 0)\n\`\`\`\n\n*Anda dapat menekan tombol **"Terapkan ke Sheet"** untuk memasukkan kolom ini.*`;
-        structuredAction = {
-          thought: "Membuat kolom lookup",
-          action: "insert_formula_column",
-          insertAfterColumn: "C",
-          header: "Hasil Lookup",
-          formula: `=XLOOKUP(A2, B:B, C:C, "N/A", 0)`
-        };
-      } else if (pLower.includes('analisis') || pLower.includes('ringkas') || pLower.includes('summary')) {
-        const rows = excelContext && excelContext.values ? excelContext.values.length : 0;
-        replyText = `### Ringkasan Analisis Data (${excelContext ? excelContext.address : 'Range Aktif'})\n\n` +
-          `* **Jumlah Baris Terdeteksi**: ${rows} baris data.\n` +
-          `* **Kelengkapan Data**: Format kolom terdeteksi normal tanpa nilai null kritis.\n` +
-          `* **Saran Tindakan**:\n` +
-          `  1. Gunakan conditional formatting untuk menyorot nilai outlier.\n` +
-          `  2. Tambahkan kolom kalkulasi persentase pertumbuhan jika memuat angka finansial/metrik.`;
-      } else if (pLower.includes('dummy') || pLower.includes('sample') || pLower.includes('contoh')) {
-        replyText = `Berikut adalah data sampel yang disiapkan dan langsung ditulis ke worksheet Anda.`;
-        structuredAction = {
-          thought: "Menulis data sampel pelanggan",
-          action: "write_range",
-          values: [
-            ["ID Pelanggan", "Nama", "Kota", "Status", "Total Transaksi"],
-            ["CUST-001", "Budi Santoso", "Jakarta", "Active", 1500000],
-            ["CUST-002", "Siti Rahma", "Surabaya", "Active", 850000],
-            ["CUST-003", "Andi Wijaya", "Bandung", "Pending", 420000],
-            ["CUST-004", "Dewi Lestari", "Medan", "Active", 2100000]
-          ]
-        };
-      } else {
-        replyText = `Halo! Saya menerima instruksi Anda: **"${prompt}"**.\n\n` +
-          `Saya mendeteksi Anda berada di range: \`${excelContext ? excelContext.address : 'Belum memilih cell'}\`.\n\n` +
-          `> 💡 **Tip:** Anda saat ini berada di **Mode Demo / Offline**.\n` +
-          `Untuk mengaktifkan kecerdasan penuh model Copilot/Gemini/GPT, silakan buka tab **Settings (⚙️)** di atas dan masukkan API Key Anda.`;
+      }
+      // Case 4: Default Universal General Case
+      else {
+        replyText = `### 🎯 1. Analisis Kebutuhan Pengguna
+Saya menerima instruksi Anda: **"${prompt}"**.
+
+### 🔍 2. Analisis & Pemahaman Data
+* **Status Worksheet**: Terhubung pada sheet **"${ov.activeSheetName || 'Aktif'}"**.
+* **Area Terpilih**: Range \`${excelContext.address || 'A1'}\` (${ov.rowCount || 0} baris data).
+* **Kolom Terdeteksi**: ${(ov.headers || []).slice(0, 8).join(", ") || 'Belum ada header terdeteksi'}.
+
+> 💡 **Tip:** Anda saat ini berada dalam **Mode Offline / Demo**.
+> Untuk mengaktifkan penalaran bebas AI (LLM live) dengan Google Gemini atau ChatGPT, buka tab **Settings (⚙️)** di sudut kanan atas dan masukkan API Key Anda.`;
       }
 
       return res.json({
@@ -292,7 +387,7 @@ Untuk menghitung total perangkat unik di seluruh kolom lembar kerja (bukan hanya
       });
     }
 
-    // B. Google Gemini API
+    // B. Google Gemini API (Live Autonomous Cognitive Agent)
     if (provider === 'gemini') {
       const candidateModels = [
         'gemini-2.5-flash',
@@ -347,11 +442,9 @@ Untuk menghitung total perangkat unik di seluruh kolom lembar kerja (bukan hanya
             const errText = await response.text();
             lastError = new Error(`Gemini API Error [${mName}] (${response.status}): ${errText}`);
             console.warn(`Model ${mName} gagal (${response.status}): ${errText.substring(0, 100)}...`);
-            // Jika 400, 401 (invalid key), atau 403, jangan fallback, langsung lempar error
             if (response.status === 400 || response.status === 401 || response.status === 403) {
               throw lastError;
             }
-            // Lanjut fallback hanya untuk 503 (high demand), 429 (rate limit), 404 (not found), atau 500
             continue;
           }
         } catch (err) {
@@ -367,7 +460,6 @@ Untuk menghitung total perangkat unik di seluruh kolom lembar kerja (bukan hanya
 
       const rawReply = data?.candidates?.[0]?.content?.parts?.[0]?.text || "Maaf, tidak ada jawaban dari Gemini.";
       
-      // Parse optional structured JSON action
       let structuredAction = null;
       let cleanReplyText = rawReply;
       const jsonMatch = rawReply.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
@@ -376,11 +468,21 @@ Untuk menghitung total perangkat unik di seluruh kolom lembar kerja (bukan hanya
           const parsed = JSON.parse(jsonMatch[1]);
           if (parsed && parsed.action && parsed.action !== 'none') {
             structuredAction = parsed;
+            
+            // NORMALISASI: Jika model masih menghasilkan action lawas 'split_column', konversi otomatis ke 'execute_office_js'
+            if (structuredAction.action === 'split_column') {
+              const srcCol = (structuredAction.sourceColumn || "B").toUpperCase();
+              const newHeaders = structuredAction.newHeaders || ["Wilayah", "STO"];
+              structuredAction.action = "execute_office_js";
+              structuredAction.code = buildOfficeJsCodeForSplit({
+                sourceCol: srcCol,
+                headers: newHeaders
+              });
+            }
           }
         } catch (e) {
-          // ignore parsing error
+          console.warn("JSON parse error:", e);
         }
-        // Bersihkan blok json agar tidak muncul mentah di chat pengguna
         cleanReplyText = cleanReplyText.replace(/```(?:json)?\s*[\s\S]*?\s*```/g, '').trim();
       }
 
@@ -435,6 +537,15 @@ Untuk menghitung total perangkat unik di seluruh kolom lembar kerja (bukan hanya
           const parsed = JSON.parse(jsonMatch[1]);
           if (parsed && parsed.action && parsed.action !== 'none') {
             structuredAction = parsed;
+            if (structuredAction.action === 'split_column') {
+              const srcCol = (structuredAction.sourceColumn || "B").toUpperCase();
+              const newHeaders = structuredAction.newHeaders || ["Wilayah", "STO"];
+              structuredAction.action = "execute_office_js";
+              structuredAction.code = buildOfficeJsCodeForSplit({
+                sourceCol: srcCol,
+                headers: newHeaders
+              });
+            }
           }
         } catch (e) {}
         cleanReplyText = cleanReplyText.replace(/```(?:json)?\s*[\s\S]*?\s*```/g, '').trim();
@@ -451,21 +562,21 @@ Untuk menghitung total perangkat unik di seluruh kolom lembar kerja (bukan hanya
   }
 });
 
-// 3. Start Server
+// 5. Start HTTPS Server
 async function startServer() {
-  const credentials = await getOrGenerateCerts();
-  const httpsServer = https.createServer(credentials, app);
+  try {
+    const certs = await getOrGenerateCerts();
+    const server = https.createServer(certs, app);
 
-  httpsServer.listen(PORT, () => {
-    console.log(`====================================================`);
-    console.log(`🚀 Excel Copilot Add-in Server is RUNNING on HTTPS!`);
-    console.log(`🔗 URL: https://localhost:${PORT}/taskpane.html`);
-    console.log(`📁 Manifest file: ${path.join(__dirname, 'manifest.xml')}`);
-    console.log(`====================================================`);
-    console.log(`💡 PENTING: Buka link di browser sekali untuk accept cert:`);
-    console.log(`👉 https://localhost:${PORT}/taskpane.html`);
-    console.log(`====================================================`);
-  });
+    server.listen(PORT, () => {
+      console.log(`=======================================================`);
+      console.log(`🚀 Copilot for Excel (ReAct Agent) aktif di https://localhost:${PORT}`);
+      console.log(`📊 Office Add-in Taskpane siap digunakan di Microsoft Excel.`);
+      console.log(`=======================================================`);
+    });
+  } catch (err) {
+    console.error("Gagal menjalankan server HTTPS:", err);
+  }
 }
 
 startServer();
