@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Copilot for Excel</title>
+  <!-- Office.js -->
+  <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Marked.js for Markdown parsing -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  
+  <style>
+    /* Telkomsel corporate palette & typography */
+    body {
+      background-color: #f8fafc;
+      color: #0f172a;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+
+    /* Custom Scrollbar */
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    
+    /* Telkomsel gradient */
+    .tsel-gradient {
+      background: linear-gradient(135deg, #001a41 0%, #002b66 60%, #ed0226 100%);
+    }
+
+    /* Markdown Styles tailored for corporate clean view */
+    .markdown-body {
+      color: #1e293b;
+      font-size: 0.8125rem;
+      line-height: 1.6;
+    }
+    .markdown-body pre {
+      background-color: #001a41;
+      color: #f8fafc;
+      padding: 0.65rem 0.85rem;
+      border-radius: 0.5rem;
+      overflow-x: auto;
+      margin: 0.5rem 0;
+      font-size: 0.75rem;
+      border: 1px solid #1e3a8a;
+    }
+    .markdown-body code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.75rem;
+      background: #fee2e2;
+      padding: 0.15rem 0.35rem;
+      border-radius: 0.25rem;
+      color: #b91c1c;
+      font-weight: 600;
+    }
+    .markdown-body pre code {
+      background: transparent;
+      padding: 0;
+      color: inherit;
+      font-weight: normal;
+    }
+    .markdown-body p { margin-bottom: 0.45rem; }
+    .markdown-body ul { list-style-type: disc; margin-left: 1.25rem; margin-bottom: 0.45rem; }
+    .markdown-body ol { list-style-type: decimal; margin-left: 1.25rem; margin-bottom: 0.45rem; }
+    .markdown-body h1, .markdown-body h2, .markdown-body h3 {
+      font-weight: 700;
+      color: #001a41;
+      margin-top: 0.75rem;
+      margin-bottom: 0.35rem;
+    }
+    .markdown-body h3 { font-size: 0.875rem; }
+    .markdown-body blockquote {
+      border-left: 3px solid #ed0226;
+      padding-left: 0.75rem;
+      color: #475569;
+      margin: 0.5rem 0;
+      background: #f1f5f9;
+      padding-top: 0.25rem;
+      padding-bottom: 0.25rem;
+      border-radius: 0 0.375rem 0.375rem 0;
+    }
+    .markdown-body table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 0.5rem 0;
+      font-size: 0.75rem;
+    }
+    .markdown-body th, .markdown-body td {
+      border: 1px solid #e2e8f0;
+      padding: 0.4rem 0.5rem;
+      text-align: left;
+    }
+    .markdown-body th {
+      background-color: #f1f5f9;
+      color: #001a41;
+      font-weight: 700;
+    }
+  </style>
+</head>
+<body class="flex flex-col h-screen select-none overflow-hidden bg-slate-50">
+
+  <!-- Telkomsel Corporate Header -->
+  <header class="tsel-gradient text-white px-3.5 py-2.5 flex justify-between items-center shadow-md">
+    <div class="flex items-center space-x-2.5">
+      <div class="w-7 h-7 rounded-lg bg-white/15 border border-white/30 flex items-center justify-center font-bold text-sm text-white shadow-inner">
+        ⚡
+      </div>
+      <div>
+        <div class="flex items-center space-x-1.5">
+          <h1 class="text-xs font-bold tracking-tight text-white">Copilot for Excel</h1>
+          <span class="text-[9px] bg-[#ed0226] text-white px-1.5 py-0.2 rounded font-semibold tracking-wider">TELKOMSEL</span>
+        </div>
+        <div class="flex items-center space-x-1 mt-0.5">
+          <span id="badge-provider" class="text-[10px] text-slate-300 font-medium">Google Gemini</span>
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+        </div>
+      </div>
+    </div>
+    <div class="flex items-center space-x-1">
+      <button id="btn-tab-settings" title="Pengaturan AI Model" class="p-1.5 rounded-md hover:bg-white/15 transition text-white/80 hover:text-white text-xs">
+        ⚙️
+      </button>
+    </div>
+  </header>
+
+  <!-- Navigation Tabs (Telkomsel Red Active Underline) -->
+  <nav class="flex bg-white border-b border-slate-200 text-xs font-medium text-slate-500 shadow-xs">
+    <button data-tab="tab-chat" class="tab-btn flex-1 py-2 text-center border-b-2 border-[#ed0226] text-[#ed0226] font-bold transition flex items-center justify-center space-x-1">
+      <span>💬</span> <span>Chat</span>
+    </button>
+    <button data-tab="tab-formula" class="tab-btn flex-1 py-2 text-center border-b-2 border-transparent hover:text-slate-900 transition flex items-center justify-center space-x-1">
+      <span>📐</span> <span>Formula</span>
+    </button>
+    <button data-tab="tab-cleaner" class="tab-btn flex-1 py-2 text-center border-b-2 border-transparent hover:text-slate-900 transition flex items-center justify-center space-x-1">
+      <span>✨</span> <span>Clean</span>
+    </button>
+  </nav>
+
+  <!-- Live Active Selection & Sheet Context Bar -->
+  <section class="bg-slate-100/80 px-3 py-1.5 border-b border-slate-200 flex justify-between items-center text-[11px]">
+    <div class="flex items-center space-x-1.5 text-slate-600 truncate">
+      <span class="font-medium text-slate-700 flex items-center space-x-1">
+        <span>📄</span> <span id="active-sheet-badge" class="font-bold text-[#001a41]">Worksheet</span>
+      </span>
+      <span class="text-slate-300">|</span>
+      <span class="text-[#ed0226] font-semibold">📍</span>
+      <span id="active-range-label" class="font-mono bg-white px-1.5 py-0.5 rounded border border-slate-300 text-slate-800 font-bold text-[10px]">
+        Siap
+      </span>
+      <span id="active-cells-count" class="text-slate-400 text-[10px]"></span>
+    </div>
+    <button id="btn-refresh-selection" title="Refresh data sheet & sel aktif" class="text-xs text-slate-500 hover:text-[#001a41] p-1 rounded hover:bg-slate-200 transition">
+      🔄
+    </button>
+  </section>
+
+  <!-- ================= TAB 1: CHAT & ASSISTANT ================= -->
+  <div id="tab-chat" class="tab-content flex-1 flex flex-col overflow-hidden bg-slate-50">
+    <!-- Messages Container -->
+    <main id="chat-messages" class="flex-1 p-3 overflow-y-auto space-y-3">
+      <!-- Welcome message -->
+      <div class="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs text-xs text-slate-700 space-y-2">
+        <div class="font-bold text-[#001a41] flex items-center space-x-1.5">
+          <span class="text-[#ed0226] text-sm">⚡</span>
+          <span>Halo! Saya Copilot for Excel.</span>
+        </div>
+        <p class="leading-relaxed text-slate-600">
+          Beri tahu saya apa yang perlu saya bantu.
+        </p>
+      </div>
+    </main>
+
+    <!-- Chat Input Section -->
+    <footer class="p-2.5 bg-white border-t border-slate-200">
+      <div class="relative bg-slate-50 rounded-xl border border-slate-300 focus-within:border-[#ed0226] focus-within:bg-white transition-all shadow-xs">
+        <textarea id="chat-input" rows="2"
+          placeholder="Tanya perhitungan, minta buatkan rumus, atau olah data..."
+          class="w-full text-xs p-2.5 pb-8 border-none rounded-xl focus:outline-none resize-none bg-transparent text-slate-900 placeholder-slate-400"></textarea>
+        
+        <div class="absolute bottom-1.5 left-2.5 right-2 flex justify-between items-center text-[11px]">
+          <label class="text-slate-500 flex items-center space-x-1 cursor-pointer hover:text-slate-800">
+            <input type="checkbox" id="chk-auto-write" class="rounded text-[#ed0226] focus:ring-0">
+            <span>Auto-tulis ke sheet</span>
+          </label>
+          <button id="btn-send-chat" class="bg-[#ed0226] hover:bg-[#c80220] text-white font-medium px-3.5 py-1 rounded-lg text-xs transition flex items-center space-x-1.5 shadow-xs">
+            <span>Kirim</span>
+            <span>➔</span>
+          </button>
+        </div>
+      </div>
+    </footer>
+  </div>
+
+  <!-- ================= TAB 2: FORMULA BUILDER ================= -->
+  <div id="tab-formula" class="tab-content flex-1 p-3.5 overflow-y-auto space-y-3 hidden bg-white">
+    <div>
+      <h2 class="text-xs font-bold text-[#001a41] uppercase tracking-wider flex items-center space-x-1.5">
+        <span class="text-[#ed0226]">⚡</span> <span>Formula Generator Pintar</span>
+      </h2>
+      <p class="text-[11px] text-slate-500 mt-0.5">Jelaskan kebutuhan perhitungan dalam bahasa sehari-hari, AI akan meracik rumusnya.</p>
+    </div>
+
+    <div class="space-y-1">
+      <label class="text-[11px] font-semibold text-slate-700">Pilih Pola Rumus Cepat:</label>
+      <div class="grid grid-cols-2 gap-1.5 text-xs">
+        <button class="formula-type-btn border border-slate-200 rounded-lg p-2 hover:bg-slate-50 text-left text-slate-800 font-medium transition" data-type="xlookup">
+          🔍 XLOOKUP / VLOOKUP
+        </button>
+        <button class="formula-type-btn border border-slate-200 rounded-lg p-2 hover:bg-slate-50 text-left text-slate-800 font-medium transition" data-type="sumifs">
+          ➕ SUMIFS / COUNTIFS
+        </button>
+        <button class="formula-type-btn border border-slate-200 rounded-lg p-2 hover:bg-slate-50 text-left text-slate-800 font-medium transition" data-type="if-nested">
+          🔀 IF / IFS Bertingkat
+        </button>
+        <button class="formula-type-btn border border-slate-200 rounded-lg p-2 hover:bg-slate-50 text-left text-slate-800 font-medium transition" data-type="text-join">
+          ✂️ TEXTJOIN / SPLIT
+        </button>
+      </div>
+    </div>
+
+    <div class="space-y-1">
+      <label class="text-[11px] font-semibold text-slate-700">Deskripsi Rumus:</label>
+      <textarea id="formula-desc-input" rows="3"
+        placeholder="Contoh: Hitung jumlah baris unik OLT di kolom A dari baris 3 sampai 200000..."
+        class="w-full text-xs p-2 border border-slate-300 rounded-lg focus:outline-none focus:border-[#ed0226] bg-slate-50"></textarea>
+    </div>
+
+    <button id="btn-generate-custom-formula" class="w-full bg-[#ed0226] hover:bg-[#c80220] text-white py-2 rounded-lg text-xs font-semibold transition flex items-center justify-center space-x-1.5 shadow-xs">
+      <span>✨ Buat Rumus Sekarang</span>
+    </button>
+
+    <div id="formula-result-container" class="hidden p-3 bg-red-50/70 border border-red-200 rounded-xl space-y-2">
+      <div class="flex justify-between items-center">
+        <span class="text-[11px] font-bold text-[#b91c1c]">Hasil Rumus Excel:</span>
+        <button id="btn-copy-formula-box" class="text-[10px] text-[#b91c1c] hover:underline font-semibold">Salin</button>
+      </div>
+      <div id="formula-result-code" class="p-2 bg-white rounded border border-red-200 font-mono text-xs text-slate-900 select-all overflow-x-auto">
+        =XLOOKUP(...)
+      </div>
+      <button id="btn-apply-formula-box" class="w-full bg-[#001a41] hover:bg-[#002b66] text-white py-1.5 rounded-lg text-xs font-medium transition">
+        ⚡ Terapkan ke Sel Aktif
+      </button>
+    </div>
+  </div>
+
+  <!-- ================= TAB 3: DATA CLEANER ================= -->
+  <div id="tab-cleaner" class="tab-content flex-1 p-3.5 overflow-y-auto space-y-3 hidden bg-white">
+    <div>
+      <h2 class="text-xs font-bold text-[#001a41] uppercase tracking-wider flex items-center space-x-1.5">
+        <span class="text-[#ed0226]">⚡</span> <span>1-Click Data Cleaner</span>
+      </h2>
+      <p class="text-[11px] text-slate-500 mt-0.5">Blok kolom atau sel di lembar kerja, lalu klik aksi pembersihan berikut:</p>
+    </div>
+
+    <div class="space-y-2">
+      <div class="text-[11px] font-bold text-slate-700">Format Teks & Spasi:</div>
+      <div class="grid grid-cols-2 gap-2 text-xs">
+        <button id="btn-clean-trim" class="border border-slate-200 rounded-lg p-2 hover:bg-slate-50 text-left transition">
+          <div class="font-semibold text-slate-900">Hapus Spasi Ekstra</div>
+          <div class="text-[10px] text-slate-500">TRIM spasi depan/belakang</div>
+        </button>
+        <button id="btn-clean-proper" class="border border-slate-200 rounded-lg p-2 hover:bg-slate-50 text-left transition">
+          <div class="font-semibold text-slate-900">Proper Case</div>
+          <div class="text-[10px] text-slate-500">Huruf Besar Di Awal Kata</div>
+        </button>
+        <button id="btn-clean-upper" class="border border-slate-200 rounded-lg p-2 hover:bg-slate-50 text-left transition">
+          <div class="font-semibold text-slate-900">UPPERCASE</div>
+          <div class="text-[10px] text-slate-500">Semua huruf kapital</div>
+        </button>
+        <button id="btn-clean-lower" class="border border-slate-200 rounded-lg p-2 hover:bg-slate-50 text-left transition">
+          <div class="font-semibold text-slate-900">lowercase</div>
+          <div class="text-[10px] text-slate-500">Semua huruf kecil</div>
+        </button>
+      </div>
+
+      <div class="text-[11px] font-bold text-slate-700 pt-2">Format Angka & Tabel:</div>
+      <div class="grid grid-cols-2 gap-2 text-xs">
+        <button id="btn-clean-currency" class="border border-slate-200 rounded-lg p-2 hover:bg-slate-50 text-left transition">
+          <div class="font-semibold text-slate-900">Mata Uang Rp</div>
+          <div class="text-[10px] text-slate-500">Format Rupiah (Rp #,##0)</div>
+        </button>
+        <button id="btn-clean-autofit" class="border border-slate-200 rounded-lg p-2 hover:bg-slate-50 text-left transition">
+          <div class="font-semibold text-slate-900">Auto-fit Kolom</div>
+          <div class="text-[10px] text-slate-500">Sesuaikan lebar otomatis</div>
+        </button>
+        <button id="btn-clean-fill-empty" class="border border-slate-200 rounded-lg p-2 hover:bg-slate-50 text-left transition">
+          <div class="font-semibold text-slate-900">Isi Sel Kosong</div>
+          <div class="text-[10px] text-slate-500">Ganti blank jadi tanda "-"</div>
+        </button>
+        <button id="btn-clean-create-table" class="border border-slate-200 rounded-lg p-2 hover:bg-slate-50 text-left transition">
+          <div class="font-semibold text-slate-900">Jadikan Tabel Resmi</div>
+          <div class="text-[10px] text-slate-500">Format Excel Table resmi</div>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= TAB 4: SETTINGS PANEL ================= -->
+  <div id="tab-settings" class="tab-content flex-1 p-4 overflow-y-auto space-y-3 hidden bg-white">
+    <div class="flex justify-between items-center border-b border-slate-200 pb-2">
+      <h2 class="text-xs font-bold text-[#001a41] uppercase tracking-wider flex items-center space-x-1.5">
+        <span>⚙️</span> <span>Pengaturan Model AI</span>
+      </h2>
+      <button id="btn-close-settings" class="text-slate-400 hover:text-slate-800 text-xs font-semibold">✕ Tutup</button>
+    </div>
+
+    <div class="space-y-1">
+      <label class="text-[11px] font-semibold text-slate-700">Pilih AI Provider:</label>
+      <select id="setting-provider" class="w-full text-xs p-2 border border-slate-300 rounded-lg focus:outline-none focus:border-[#ed0226] bg-white">
+        <option value="gemini">Google Gemini API (Direkomendasikan)</option>
+        <option value="demo">Demo / Offline Mode (Bebas tanpa API Key)</option>
+        <option value="openai">OpenAI (ChatGPT GPT-4o / GPT-4o mini)</option>
+        <option value="azure">Azure OpenAI / Enterprise Telkomsel Gateway</option>
+      </select>
+    </div>
+
+    <div id="container-api-key" class="space-y-1">
+      <label class="text-[11px] font-semibold text-slate-700">API Key:</label>
+      <input type="password" id="setting-api-key" placeholder="AQ.xxx atau AIzaSyxxx"
+        class="w-full text-xs p-2 border border-slate-300 rounded-lg focus:outline-none focus:border-[#ed0226] bg-white font-mono">
+      <p class="text-[10px] text-slate-400">API Key disimpan aman hanya di browser lokal kamu (localStorage).</p>
+    </div>
+
+    <div id="container-custom-endpoint" class="space-y-1 hidden">
+      <label class="text-[11px] font-semibold text-slate-700">Endpoint URL (Azure / Gateway Telkomsel):</label>
+      <input type="text" id="setting-endpoint" placeholder="https://your-resource.openai.azure.com/openai/deployments/..."
+        class="w-full text-xs p-2 border border-slate-300 rounded-lg focus:outline-none focus:border-[#ed0226] bg-white font-mono">
+    </div>
+
+    <button id="btn-save-settings" class="w-full bg-[#ed0226] hover:bg-[#c80220] text-white py-2 rounded-lg text-xs font-semibold transition mt-2 shadow-xs">
+      💾 Simpan Pengaturan
+    </button>
+  </div>
+
+  <!-- Toast Notification Pop-up -->
+  <div id="toast" class="fixed bottom-3 left-3 right-3 bg-[#001a41] text-white text-[11px] py-2 px-3 rounded-xl shadow-lg border border-slate-700 transform translate-y-16 opacity-0 transition-all duration-200 pointer-events-none text-center">
+    Pesan notifikasi
+  </div>
+
+  <script src="taskpane.js?t=1793869100"></script>
+</body>
+</html>
