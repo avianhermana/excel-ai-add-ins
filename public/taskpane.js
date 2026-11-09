@@ -293,19 +293,29 @@ const ExcelAgent = {
 
   // 6. Eksekusi Script Office.js Dinamis (Arsitektur Claude for Excel)
   async executeOfficeJs(action) {
-    const code = action.code;
+    let code = (action.code || "").trim();
     if (!code) throw new Error("Tidak ada kode Office.js yang diberikan.");
 
-    await Excel.run(async (context) => {
-      const sheet = context.workbook.worksheets.getActiveWorksheet();
-      const fn = new Function("context", "sheet", "Excel", `return (async () => { ${code} })();`);
-      await fn(context, sheet, Excel);
-      await context.sync();
-    });
+    // Hapus format ```javascript ... ``` jika ada
+    code = code.replace(/^```(?:javascript|js)?\s*/i, "").replace(/\s*```$/i, "").trim();
+
+    const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
+
+    if (code.includes("Excel.run")) {
+      const fn = new AsyncFunction("Excel", `return (async () => { ${code} })();`);
+      await fn(Excel);
+    } else {
+      await Excel.run(async (context) => {
+        const sheet = context.workbook.worksheets.getActiveWorksheet();
+        const fn = new AsyncFunction("context", "sheet", "Excel", `return (async () => { ${code} })();`);
+        await fn(context, sheet, Excel);
+        await context.sync();
+      });
+    }
 
     return {
       success: true,
-      summary: action.thought || "Script Office.js berhasil dieksekusi langsung di worksheet!"
+      summary: action.summary || action.thought || "Tindakan Office.js berhasil diterapkan langsung di worksheet!"
     };
   },
 
@@ -418,14 +428,14 @@ async function readActiveSelection() {
       }
 
       try {
-        const topRange = sheet.getRange("A1:AZ15");
-        topRange.load(["values"]);
+        const topRange = sheet.getRange("A1:AZ20");
+        topRange.load(["values", "text"]);
         await context.sync();
 
         if (topRange.values && topRange.values.length > 0) {
           let bestRow = 0;
           let maxCount = 0;
-          for (let r = 0; r < topRange.values.length; r++) {
+          for (let r = 0; r < Math.min(5, topRange.values.length); r++) {
             const count = topRange.values[r].filter(v => v !== null && String(v).trim().length > 0).length;
             if (count > maxCount) {
               maxCount = count;
@@ -437,8 +447,17 @@ async function readActiveSelection() {
             .map(v => String(v ?? "").trim())
             .filter(v => v.length > 0);
 
-          if (bestRow + 1 < topRange.values.length) {
-            sheetOverview.sampleData = topRange.values.slice(bestRow + 1);
+          sheetOverview.sampleData = [];
+          for (let r = bestRow + 1; r < topRange.values.length; r++) {
+            const rowText = topRange.text?.[r] || topRange.values[r];
+            if (rowText && rowText.some(v => v !== null && String(v).trim().length > 0)) {
+              const rowObj = {};
+              for (let c = 0; c < Math.min(rowText.length, sheetOverview.headers.length); c++) {
+                const headerName = sheetOverview.headers[c] || indexToColLetter(c);
+                rowObj[`${indexToColLetter(c)} (${headerName})`] = rowText[c] ?? "";
+              }
+              sheetOverview.sampleData.push(rowObj);
+            }
           }
         }
       } catch (headerErr) {
@@ -541,9 +560,12 @@ async function sendMessage() {
   chatHistory.push({ role: "user", text: prompt });
   if (chatHistory.length > 12) chatHistory = chatHistory.slice(-12);
 
-  const loadingId = appendChatMessage("ai", "Sedang memproses dan menganalisis lembar kerja dengan AI Agent...");
+  const loadingId = appendChatMessage("ai", "Sedang menganalisis struktur data dan meracik aksi dengan AI Agent...");
 
   try {
+    // Selalu ambil observasi snapshot data sheet terbaru sebelum mengirim ke AI
+    await readActiveSelection();
+
     const payload = {
       prompt,
       excelContext: currentSelection,
@@ -642,16 +664,19 @@ function appendChatMessage(sender, text, structuredAction = null) {
     wrapper.appendChild(bodyEl);
     msgEl.appendChild(wrapper);
 
-    // Interactive Agent Card
+    // Interactive Agent Card (Reasoning + Code Synthesis)
     if (structuredAction) {
       const card = document.createElement("div");
-      card.className = "mt-3 p-3 rounded-xl bg-[#001a41] border border-[#002b66] text-white space-y-2 shadow-sm";
+      card.className = "mt-3 p-3.5 rounded-xl bg-[#001a41] border border-[#002b66] text-white space-y-2.5 shadow-md";
 
       let title = "⚡ AI Agent: Tindakan Lembar Kerja";
-      if (structuredAction.action === "split_column") title = "⚡ AI Agent: Pecah Kolom Otomatis";
+      if (structuredAction.action === "split_column") title = "⚡ AI Agent: Pecah Kolom";
+      else if (structuredAction.action === "execute_office_js" || structuredAction.action === "execute_code") title = "⚡ AI Agent: Eksekusi Office.js Dinamis";
       else if (structuredAction.action === "insert_formula_column") title = "⚡ AI Agent: Sisipkan Kolom Rumus";
       else if (structuredAction.action === "insert_column_with_data") title = "⚡ AI Agent: Tambah Kolom Data";
       else if (structuredAction.action === "update_column") title = "⚡ AI Agent: Pembersihan Format";
+
+      const hasCode = !!structuredAction.code;
 
       card.innerHTML = `
         <div class="flex items-center justify-between">
@@ -663,15 +688,29 @@ function appendChatMessage(sender, text, structuredAction = null) {
             Siap Diterapkan
           </span>
         </div>
-        <p class="text-[11px] text-slate-300 leading-relaxed font-sans">
-          ${escapeHtml(structuredAction.thought || "AI Agent siap mengeksekusi operasi langsung di spreadsheet Anda.")}
-        </p>
+        <div class="text-[11px] text-slate-200 leading-relaxed font-sans bg-black/25 p-2.5 rounded-lg border border-white/5 space-y-1">
+          <div class="text-[10px] uppercase font-bold text-emerald-400">🧠 Penalaran & Observasi Data:</div>
+          <p>${escapeHtml(structuredAction.thought || "AI Agent telah menganalisis request dan struktur data Anda.")}</p>
+        </div>
         <div class="pt-1 flex items-center space-x-2">
           <button id="btn-agent-run-${msgId}" class="bg-[#ed0226] hover:bg-[#c80220] text-white font-semibold px-3 py-1.5 rounded-lg text-xs flex items-center space-x-1.5 shadow-xs transition">
             <span>▶️ Terapkan ke Sheet</span>
           </button>
+          ${hasCode ? `<button id="btn-code-${msgId}" class="text-[10px] text-slate-400 hover:text-white underline ml-auto">Lihat Kode</button>` : ''}
         </div>
+        ${hasCode ? `<div id="code-box-${msgId}" class="hidden p-2.5 bg-slate-950 rounded-lg text-[10px] font-mono text-emerald-400 overflow-x-auto select-all max-h-40 border border-slate-800">${escapeHtml(structuredAction.code)}</div>` : ''}
       `;
+
+      if (hasCode) {
+        const btnToggle = card.querySelector(`#btn-code-${msgId}`);
+        const codeBox = card.querySelector(`#code-box-${msgId}`);
+        if (btnToggle && codeBox) {
+          btnToggle.onclick = () => {
+            codeBox.classList.toggle("hidden");
+            btnToggle.innerText = codeBox.classList.contains("hidden") ? "Lihat Kode" : "Sembunyikan Kode";
+          };
+        }
+      }
 
       card.querySelector(`#btn-agent-run-${msgId}`).onclick = async () => {
         const btn = card.querySelector(`#btn-agent-run-${msgId}`);

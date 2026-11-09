@@ -95,39 +95,34 @@ app.post('/api/chat', async (req, res) => {
       contextStr = "Tidak ada range data Excel yang sedang dipilih.";
     }
 
-    const systemPrompt = `Anda adalah "Copilot for Excel - Autonomous Spreadsheet Agent" (seperti Claude for Excel atau Microsoft 365 Copilot Agent).
-Anda BUKAN chatbot pasif yang menyuruh pengguna copy-paste rumus secara manual.
-Ketika pengguna meminta suatu tugas di Excel, Anda BERPIKIR dan MENGHASILKAN TINDAKAN NYATA (AGENT ACTION) yang dieksekusi otomatis oleh Add-in langsung di lembar kerja Excel!
+    const systemPrompt = `Anda adalah "Copilot for Excel - Autonomous Spreadsheet Agent" (arsitektur penalaran tingkat tinggi setara Claude for Excel & ChatGPT Code Interpreter).
+Tugas Anda:
+1. MENGANALISIS REQUEST PENGGUNA:
+   Pahami tujuan akhir pengguna (apakah memecah kolom, menambah kolom kalkulasi, merapikan data, melakukan pencocokan antar-sheet, dsb.).
+2. OBSERVASI DATA NYATA SECARA MENDALAM (CRUCIAL):
+   Periksa informasi worksheet dan "Cuplikan Contoh Baris Data" (sampleData) di bawah!
+   Lihat bagaimana data tertulis secara fisik:
+   - Apakah ada spasi ganda / padding spasi ekstra (misal: "KOTA SURABAYA          LKI - LAKARSANTRI")?
+   - Apakah ada token multi-kata yang tidak boleh terpotong sembarangan?
+   - Apakah ada pola kode khusus (seperti "CAT - CAMPUR DARAT") atau format tanggal?
+3. SINTESIS KODE EKSEKUSI OFFICE.JS DINAMIS (Bukan Macro Kaku):
+   Anda adalah pembuat kode JavaScript Office.js yang langsung memanipulasi workbook.
+   Tulis kode Office.js yang dirancang presisi HANYA untuk pola data nyata yang baru saja Anda lihat.
 
-PRINSIP UTAMA AGENT (ANTI-PASIF & BEBAS ERROR):
-1. JANGAN PERNAH menyuruh pengguna membuat kolom sendiri atau copy-paste rumus manual! Anda yang menyisipkan kolom dan menuliskan datanya langsung.
-2. JANGAN PERNAH menimpa data asli pengguna di sel aktif dengan rumus rumit (misal =MAP atau =TEXTSPLIT) yang bisa merusak data asli dan menghasilkan error #NAME? atau referensi sirkular!
-3. Jika pengguna meminta "pecah kolom" (misal: pecah 'Wilayah & STO' jadi 'Wilayah' dan 'STO', atau pecah tanggal):
-   - Gunakan action: "split_column"
-   - Tentukan kolom sumber (misal "B" atau "C")
-   - Sisipkan kolom baru di sebelah kanan (misal setelah "B")
-   - Tentukan nama header baru (misal ["Wilayah", "STO"] atau ["Start Date", "End Date"])
-   - OBSERVASI SAMPEL DATA SECARA MENDALAM:
-     Perhatikan baik-baik cuplikan contoh data (sampleData)!
-     Jika data memiliki nama wilayah multi-kata dan kode STO (contoh: "KOTA SURABAYA          LKI - LAKARSANTRI"), pemisahnya adalah spasi ganda/banyak spasi ("\\s{2,}|\\t"). JANGAN PERNAH gunakan spasi tunggal (" ") karena nama wilayah seperti "KOTA SURABAYA" akan salah terpotong!
-4. Jika tugas membutuhkan scripting kustom Office.js tingkat lanjut:
-   - Gunakan action: "execute_office_js" dengan properti "code" berisi async function Office.js.
-5. Jika pengguna meminta "tambah kolom status/kategori/kalkulasi":
-   - Gunakan action: "insert_column_with_data" atau "insert_formula_column"
-6. Jika pengguna meminta "rapikan format teks":
-   - Gunakan action: "update_column" (proper_case, uppercase, trim)
-7. Penghitungan Jumlah Perangkat Jaringan (OLT, ODC, ODP):
-   - Jika pengguna meminta hitung jumlah perangkat unik di sheet, selalu hitung DISTINCT COUNT kolom penuh (=COUNTA(UNIQUE(FILTER(...)))) dan jelaskan hasilnya secara lugas.
+PRINSIP WAJIB KODE OFFICE.JS:
+- OVERWRITE PROTECTION: JANGAN PERNAH menimpa kolom data asli kecuali diminta. Selalu sisipkan kolom baru dengan \`sheet.getRange("...").insert(Excel.InsertShiftDirection.right)\` sehingga kolom yang sudah ada bergeser aman ke kanan.
+- FORMATTING: Berikan header dengan font bold (\`font.bold = true\`), font putih (\`#ffffff\`), fill \`#001a41\` (Deep Navy).
+- KOMPUTASI DALAM JAVASCRIPT: Lakukan transformasi teks/angka di dalam JavaScript runtime (bukan menaruh formula rumit seperti =MAP atau =LAMBDA yang rawan error #NAME? pada Excel desktop).
+- BATCH OPERATIONS: Baca seluruh range sumber dengan \`range.load(["text", "values"])\`, proses dalam loop JS, lalu tuliskan array 2D sekaligus ke range target.
+- AUTOFIT: Selalu panggil \`format.autofitColumns()\` pada kolom baru.
 
-FORMAT BLOK AKSI AGENT (SERTAKAN DI PALING AKHIR RESPON ANDA):
+FORMAT BLOK AKSI WAJIB (JSON DI AKHIR RESPONS):
 \`\`\`json
 {
-  "thought": "Penalaran observasi mendalam Anda mengenai struktur data dan tindakan yang akan dieksekusi",
-  "action": "split_column" | "execute_office_js" | "insert_column_with_data" | "insert_formula_column" | "update_column" | "write_range",
-  "sourceColumn": "B",
-  "insertAfterColumn": "B",
-  "newHeaders": ["Wilayah", "STO"],
-  "delimiter": "\\s{2,}|\\t"
+  "thought": "Penalaran analitis Anda: 1) Kebutuhan pengguna, 2) Observasi fisik data sampleData, 3) Keputusan algoritma transformasi.",
+  "action": "execute_office_js",
+  "code": "const sheet = context.workbook.worksheets.getActiveWorksheet();\\nconst used = sheet.getUsedRange();\\nused.load([\\"rowCount\\", \\"rowIndex\\"]);\\nawait context.sync();\\nconst lastRow = Math.max(used.rowIndex + used.rowCount, 10);\\nconst colB = sheet.getRange(\\"B1:B\\" + lastRow);\\ncolB.load([\\"text\\", \\"values\\"]);\\nawait context.sync();\\nsheet.getRange(\\"C:D\\").insert(Excel.InsertShiftDirection.right);\\nawait context.sync();\\nconst hdr = sheet.getRange(\\"C1:D1\\");\\nhdr.values = [[\\"Wilayah\\", \\"STO\\"]];\\nhdr.format.font.bold = true;\\nhdr.format.font.color = \\"#ffffff\\";\\nhdr.format.fill.color = \\"#001a41\\";\\nconst newVals = [];\\nfor (let i = 1; i < colB.values.length; i++) {\\n  const val = String(colB.text[i]?.[0] || colB.values[i]?.[0] || \\"\\").trim();\\n  if (!val) { newVals.push([\\"\\", \\"\\"]); continue; }\\n  const parts = val.split(/\\\\s{2,}|\\\\t/).map(s => s.trim()).filter(Boolean);\\n  if (parts.length >= 2) newVals.push([parts[0], parts.slice(1).join(\\" \\")]);\\n  else newVals.push([val, \\"\\"]);\\n}\\nif (newVals.length > 0) sheet.getRange(\\"C2:D\\" + (1 + newVals.length)).values = newVals;\\nsheet.getRange(\\"C:D\\").format.autofitColumns();\\nawait context.sync();",
+  "summary": "Berhasil menyisipkan 2 kolom (Wilayah & STO) dan memecah data secara presisi!"
 }
 \`\`\`
 
@@ -154,12 +149,50 @@ Saya telah menganalisis kolom **Wilayah & STO (Kolom B)**:
 Tindakan ini langsung dieksekusi ke worksheet Anda!`;
 
         structuredAction = {
-          thought: "Mendeteksi permintaan memecah kolom Wilayah & STO di kolom B menjadi Wilayah dan STO. Menggunakan pemisah spasi ganda (\\s{2,}) agar wilayah multi-kata (seperti KOTA SURABAYA) tidak terpotong.",
-          action: "split_column",
-          sourceColumn: "B",
-          insertAfterColumn: "B",
-          newHeaders: ["Wilayah", "STO"],
-          delimiter: "\\s{2,}|\\t"
+          thought: "Analisis Data: Kolom B memuat nama wilayah (seperti 'TULUNGAGUNG' atau wilayah multi-kata 'KOTA SURABAYA') yang dipisahkan oleh spasi ganda (\\s{2,}) dengan kode dan nama STO ('CAT - CAMPUR DARAT', 'LKI - LAKARSANTRI'). Kode Office.js akan menyisipkan 2 kolom di sebelah kanan B, menetapkan header 'Wilayah' & 'STO', memecah nilai menggunakan regex \\s{2,}|\\t, dan menuliskan data secara lengkap.",
+          action: "execute_office_js",
+          code: `const sheet = context.workbook.worksheets.getActiveWorksheet();
+const usedRange = sheet.getUsedRange();
+usedRange.load(["rowCount", "rowIndex"]);
+await context.sync();
+
+const lastRow = Math.max(usedRange.rowIndex + usedRange.rowCount, 10);
+const limitRows = Math.min(lastRow, 5000);
+
+const colB = sheet.getRange("B1:B" + limitRows);
+colB.load(["text", "values"]);
+await context.sync();
+
+sheet.getRange("C:D").insert(Excel.InsertShiftDirection.right);
+await context.sync();
+
+const header = sheet.getRange("C1:D1");
+header.values = [["Wilayah", "STO"]];
+header.format.font.bold = true;
+header.format.font.color = "#ffffff";
+header.format.fill.color = "#001a41";
+
+const newValues = [];
+for (let i = 1; i < colB.values.length; i++) {
+  const val = String(colB.text[i]?.[0] || colB.values[i]?.[0] || "").trim();
+  if (!val) { newValues.push(["", ""]); continue; }
+  
+  const parts = val.split(/\\s{2,}|\\t/).map(s => s.trim()).filter(Boolean);
+  if (parts.length >= 2) {
+    newValues.push([parts[0], parts.slice(1).join(" ")]);
+  } else {
+    const m = val.match(/^(.*?)\\s+([A-Z0-9]{3,4}\\s*-\\s*.*)$/);
+    if (m) newValues.push([m[1].trim(), m[2].trim()]);
+    else newValues.push([val, ""]);
+  }
+}
+
+if (newValues.length > 0) {
+  sheet.getRange("C2:D" + (1 + newValues.length)).values = newValues;
+}
+sheet.getRange("C:D").format.autofitColumns();
+await context.sync();`,
+          summary: "Berhasil menyisipkan 2 kolom (Wilayah & STO) dan memecah seluruh baris data secara presisi!"
         };
       }
       // Demo: Pecah Kolom Periode / Tanggal / Streak
