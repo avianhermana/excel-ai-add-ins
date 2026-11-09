@@ -102,28 +102,32 @@ Ketika pengguna meminta suatu tugas di Excel, Anda BERPIKIR dan MENGHASILKAN TIN
 PRINSIP UTAMA AGENT (ANTI-PASIF & BEBAS ERROR):
 1. JANGAN PERNAH menyuruh pengguna membuat kolom sendiri atau copy-paste rumus manual! Anda yang menyisipkan kolom dan menuliskan datanya langsung.
 2. JANGAN PERNAH menimpa data asli pengguna di sel aktif dengan rumus rumit (misal =MAP atau =TEXTSPLIT) yang bisa merusak data asli dan menghasilkan error #NAME? atau referensi sirkular!
-3. Jika pengguna meminta "pecah kolom" (misal: pecah 'Periode Streak' jadi 'Start Date' dan 'End Date', atau pecah nama):
+3. Jika pengguna meminta "pecah kolom" (misal: pecah 'Wilayah & STO' jadi 'Wilayah' dan 'STO', atau pecah tanggal):
    - Gunakan action: "split_column"
-   - Tentukan kolom sumber (misal "C")
-   - Sisipkan kolom baru di sebelah kanan (misal setelah "C")
-   - Tentukan nama header baru (misal ["Start Date", "End Date"])
-   - Tentukan tipe ekstraksi: "dates" jika memuat tanggal seperti 2026-10-28 --- 2026-10-31, atau "delimiter" jika dipisah spasi/koma.
-4. Jika pengguna meminta "tambah kolom status/kategori/kalkulasi":
+   - Tentukan kolom sumber (misal "B" atau "C")
+   - Sisipkan kolom baru di sebelah kanan (misal setelah "B")
+   - Tentukan nama header baru (misal ["Wilayah", "STO"] atau ["Start Date", "End Date"])
+   - OBSERVASI SAMPEL DATA SECARA MENDALAM:
+     Perhatikan baik-baik cuplikan contoh data (sampleData)!
+     Jika data memiliki nama wilayah multi-kata dan kode STO (contoh: "KOTA SURABAYA          LKI - LAKARSANTRI"), pemisahnya adalah spasi ganda/banyak spasi ("\\s{2,}|\\t"). JANGAN PERNAH gunakan spasi tunggal (" ") karena nama wilayah seperti "KOTA SURABAYA" akan salah terpotong!
+4. Jika tugas membutuhkan scripting kustom Office.js tingkat lanjut:
+   - Gunakan action: "execute_office_js" dengan properti "code" berisi async function Office.js.
+5. Jika pengguna meminta "tambah kolom status/kategori/kalkulasi":
    - Gunakan action: "insert_column_with_data" atau "insert_formula_column"
-5. Jika pengguna meminta "rapikan format teks":
+6. Jika pengguna meminta "rapikan format teks":
    - Gunakan action: "update_column" (proper_case, uppercase, trim)
-6. Penghitungan Jumlah Perangkat Jaringan (OLT, ODC, ODP):
+7. Penghitungan Jumlah Perangkat Jaringan (OLT, ODC, ODP):
    - Jika pengguna meminta hitung jumlah perangkat unik di sheet, selalu hitung DISTINCT COUNT kolom penuh (=COUNTA(UNIQUE(FILTER(...)))) dan jelaskan hasilnya secara lugas.
 
 FORMAT BLOK AKSI AGENT (SERTAKAN DI PALING AKHIR RESPON ANDA):
 \`\`\`json
 {
-  "thought": "Penalaran singkat Anda mengenai tindakan yang akan dieksekusi langsung di sheet",
-  "action": "split_column" | "insert_column_with_data" | "insert_formula_column" | "update_column" | "write_range",
-  "sourceColumn": "C",
-  "insertAfterColumn": "C",
-  "newHeaders": ["Start Date", "End Date"],
-  "extractType": "dates"
+  "thought": "Penalaran observasi mendalam Anda mengenai struktur data dan tindakan yang akan dieksekusi",
+  "action": "split_column" | "execute_office_js" | "insert_column_with_data" | "insert_formula_column" | "update_column" | "write_range",
+  "sourceColumn": "B",
+  "insertAfterColumn": "B",
+  "newHeaders": ["Wilayah", "STO"],
+  "delimiter": "\\s{2,}|\\t"
 }
 \`\`\`
 
@@ -137,8 +141,29 @@ ${contextStr}`;
 
       const pLower = (prompt || '').toLowerCase();
 
-      // Demo: Pecah Kolom Periode / Tanggal / Nama
-      if (pLower.includes('pecah') || pLower.includes('split') || pLower.includes('periode') || pLower.includes('streak') || pLower.includes('start date') || pLower.includes('end date') || pLower.includes('tanggal')) {
+      // Demo: Pecah Kolom Wilayah & STO
+      if ((pLower.includes('wilayah') && pLower.includes('sto')) || (pLower.includes('b') && pLower.includes('sto'))) {
+        replyText = `### ⚡ Memecah Kolom Wilayah & STO Langsung di Sheet
+
+Saya telah menganalisis kolom **Wilayah & STO (Kolom B)**:
+1. Mengamati pola data: Wilayah (termasuk nama multi-kata seperti *"KOTA SURABAYA"*) dipisahkan oleh spasi ganda (\`\\s{2,}\`) dengan kode & nama STO (*"LKI - LAKARSANTRI"*).
+2. Menyisipkan **2 kolom baru** ("Wilayah" dan "STO") di sebelah kanan Kolom B.
+3. Memecah seluruh baris data secara presisi sehingga nama kota tidak terpotong dan STO terisi penuh.
+4. Menyesuaikan lebar kolom secara otomatis (Auto-fit).
+
+Tindakan ini langsung dieksekusi ke worksheet Anda!`;
+
+        structuredAction = {
+          thought: "Mendeteksi permintaan memecah kolom Wilayah & STO di kolom B menjadi Wilayah dan STO. Menggunakan pemisah spasi ganda (\\s{2,}) agar wilayah multi-kata (seperti KOTA SURABAYA) tidak terpotong.",
+          action: "split_column",
+          sourceColumn: "B",
+          insertAfterColumn: "B",
+          newHeaders: ["Wilayah", "STO"],
+          delimiter: "\\s{2,}|\\t"
+        };
+      }
+      // Demo: Pecah Kolom Periode / Tanggal / Streak
+      else if (pLower.includes('pecah') || pLower.includes('split') || pLower.includes('periode') || pLower.includes('streak') || pLower.includes('start date') || pLower.includes('end date') || pLower.includes('tanggal')) {
         replyText = `### ⚡ Menjalankan Pemecahan Kolom Langsung di Sheet
 
 Saya telah memproses permintaan Anda untuk memecah kolom **Periode Streak (Kolom C)**:
@@ -237,6 +262,9 @@ Untuk menghitung total perangkat unik di seluruh kolom lembar kerja (bukan hanya
     // B. Google Gemini API
     if (provider === 'gemini') {
       const candidateModels = [
+        'gemini-2.5-flash',
+        'gemini-2.0-flash',
+        'gemini-1.5-flash',
         'gemini-3.5-flash',
         'gemini-3.1-pro-preview',
         'gemini-3.1-flash-lite',

@@ -100,7 +100,7 @@ const ExcelAgent = {
       headerRange.format.font.color = "#ffffff";
       headerRange.format.fill.color = "#001a41"; // Deep Navy Telkomsel
 
-      // D. Ekstrak data untuk seluruh baris
+      // D. Ekstrak data untuk seluruh baris dengan penalaran cerdas
       const transformedRows = [];
       const numRows = sourceRange.values.length;
 
@@ -114,22 +114,44 @@ const ExcelAgent = {
         }
 
         let extracted = [];
-        if (action.extractType === "dates" || strVal.match(/\d{4}/)) {
-          // Format rentang tanggal (YYYY-MM-DD atau sejenisnya)
+
+        // 1. Format Tanggal / Periode (jika extractType dates atau terdeteksi pola tanggal)
+        if (action.extractType === "dates" || strVal.match(/\d{4}[-/.]\d{1,2}[-/.]\d{1,2}.*?\d{4}[-/.]\d{1,2}[-/.]\d{1,2}/)) {
           const dates = strVal.match(/\d{4}[-/.]\d{1,2}[-/.]\d{1,2}/g);
           if (dates && dates.length >= 2) {
             extracted = [dates[0], dates[1]];
           } else if (dates && dates.length === 1) {
             extracted = [dates[0], dates[0]];
-          } else {
-            const parts = strVal.split(/---|–|-|s\/d|\sto\s/i).map(s => s.trim());
-            extracted = [parts[0] || "", parts[1] || ""];
           }
-        } else {
-          // Format delimiter umum (spasi, strip, koma)
-          const delim = action.delimiter || " ";
-          const parts = strVal.split(delim).map(s => s.trim());
+        }
+        // 2. Pemisah Spasi Ganda / Banyak Spasi / Tab (\s{2,} atau \t) - Pola data Wilayah & STO
+        else if (strVal.match(/\s{2,}|\t/)) {
+          const parts = strVal.split(/\s{2,}|\t/).map(s => s.trim()).filter(Boolean);
+          if (parts.length >= 2) {
+            extracted = [parts[0], parts.slice(1).join(" ")];
+          } else {
+            extracted = [parts[0] || "", ""];
+          }
+        }
+        // 3. Pola Kode STO (contoh: "KOTA SURABAYA LKI - LAKARSANTRI" -> [A-Z0-9]{3,4}\s*-\s*)
+        else if (strVal.match(/^(.*?)\s+([A-Z0-9]{3,4}\s*-\s*.*)$/)) {
+          const m = strVal.match(/^(.*?)\s+([A-Z0-9]{3,4}\s*-\s*.*)$/);
+          extracted = [m[1].trim(), m[2].trim()];
+        }
+        // 4. Delimiter spesifik dari AI jika diberikan
+        else if (action.delimiter) {
+          const regexDelim = new RegExp(action.delimiter);
+          const parts = strVal.split(regexDelim).map(s => s.trim()).filter(Boolean);
           extracted = parts.slice(0, count);
+        }
+        // 5. Fallback split strip / pemisah umum
+        else {
+          const parts = strVal.split(/---|–|-|;|,/).map(s => s.trim()).filter(Boolean);
+          if (parts.length > 1) {
+            extracted = [parts[0], parts.slice(1).join(" ")];
+          } else {
+            extracted = [strVal, ""];
+          }
         }
 
         while (extracted.length < count) extracted.push("");
@@ -269,11 +291,30 @@ const ExcelAgent = {
     return { success: true, summary: `${values.length} baris data berhasil ditulis ke sheet!` };
   },
 
+  // 6. Eksekusi Script Office.js Dinamis (Arsitektur Claude for Excel)
+  async executeOfficeJs(action) {
+    const code = action.code;
+    if (!code) throw new Error("Tidak ada kode Office.js yang diberikan.");
+
+    await Excel.run(async (context) => {
+      const sheet = context.workbook.worksheets.getActiveWorksheet();
+      const fn = new Function("context", "sheet", "Excel", `return (async () => { ${code} })();`);
+      await fn(context, sheet, Excel);
+      await context.sync();
+    });
+
+    return {
+      success: true,
+      summary: action.thought || "Script Office.js berhasil dieksekusi langsung di worksheet!"
+    };
+  },
+
   // Dispatcher Utama
   async executeAction(action) {
     if (!action) return null;
     const actType = action.action || "";
     if (actType === "split_column") return await this.splitColumn(action);
+    if (actType === "execute_office_js" || actType === "execute_code") return await this.executeOfficeJs(action);
     if (actType === "insert_column_with_data") return await this.insertColumnWithData(action);
     if (actType === "insert_formula_column") return await this.insertFormulaColumn(action);
     if (actType === "update_column") return await this.updateColumn(action);
@@ -377,7 +418,7 @@ async function readActiveSelection() {
       }
 
       try {
-        const topRange = sheet.getRange("A1:AZ3");
+        const topRange = sheet.getRange("A1:AZ15");
         topRange.load(["values"]);
         await context.sync();
 
