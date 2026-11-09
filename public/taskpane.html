@@ -180,9 +180,9 @@
           class="w-full text-xs p-2.5 pb-8 border-none rounded-xl focus:outline-none resize-none bg-transparent text-slate-900 placeholder-slate-400"></textarea>
         
         <div class="absolute bottom-1.5 left-2.5 right-2 flex justify-between items-center text-[11px]">
-          <label class="text-slate-500 flex items-center space-x-1 cursor-pointer hover:text-slate-800">
-            <input type="checkbox" id="chk-auto-write" class="rounded text-[#ed0226] focus:ring-0">
-            <span>Auto-tulis ke sheet</span>
+          <label class="text-slate-600 flex items-center space-x-1.5 cursor-pointer hover:text-slate-900 select-none font-medium text-[11px]" title="Jika aktif, AI akan langsung mengeksekusi operasi (sisipkan kolom, pecah data, isi nilai) ke worksheet tanpa perlu konfirmasi manual">
+            <input type="checkbox" id="chk-auto-write" class="rounded text-[#ed0226] focus:ring-0 accent-[#ed0226]" checked>
+            <span class="flex items-center space-x-1"><span>⚡</span><span>Auto-eksekusi ke sheet (Agent)</span></span>
           </label>
           <button id="btn-send-chat" class="bg-[#ed0226] hover:bg-[#c80220] text-white font-medium px-3.5 py-1 rounded-lg text-xs transition flex items-center space-x-1.5 shadow-xs">
             <span>Kirim</span>

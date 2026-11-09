@@ -17,12 +17,284 @@ let settings = {
   endpoint: localStorage.getItem("copilot_endpoint") || ""
 };
 
+// Helper: Konversi Huruf Kolom ke Index (0-based) & sebaliknya
+function colLetterToIndex(col) {
+  if (!col) return 0;
+  col = col.toUpperCase().trim();
+  let index = 0;
+  for (let i = 0; i < col.length; i++) {
+    index = index * 26 + (col.charCodeAt(i) - 64);
+  }
+  return index - 1;
+}
+
+function indexToColLetter(index) {
+  let letter = "";
+  index += 1;
+  while (index > 0) {
+    let remainder = (index - 1) % 26;
+    letter = String.fromCharCode(65 + remainder) + letter;
+    index = Math.floor((index - 1) / 26);
+  }
+  return letter;
+}
+
+function escapeHtml(str) {
+  return (str || "").replace(/[&<>"']/g, (m) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#039;"
+  })[m]);
+}
+
+// ==========================================
+// EXCEL AGENT ENGINE (AUTONOMOUS EXECUTION)
+// ==========================================
+const ExcelAgent = {
+  // 1. Memecah Kolom (Split Column) langsung di sheet
+  async splitColumn(action) {
+    const sourceCol = (action.sourceColumn || "C").toUpperCase();
+    const insertAfterCol = (action.insertAfterColumn || sourceCol).toUpperCase();
+    const newHeaders = action.newHeaders || ["Start Date", "End Date"];
+    const count = newHeaders.length;
+
+    let rowCountProcessed = 0;
+
+    await Excel.run(async (context) => {
+      const sheet = context.workbook.worksheets.getActiveWorksheet();
+      const usedRange = sheet.getUsedRange();
+      usedRange.load(["rowCount", "rowIndex"]);
+      await context.sync();
+
+      const lastRow = Math.max(usedRange.rowIndex + usedRange.rowCount, 10);
+      const limitRows = Math.min(lastRow, 5000);
+
+      // A. Baca kolom sumber
+      const sourceRange = sheet.getRange(`${sourceCol}1:${sourceCol}${limitRows}`);
+      sourceRange.load(["values", "text", "formulas"]);
+      await context.sync();
+
+      // Periksa apakah cell baris 2 sempat rusak karena formula lama (=MAP / #NAME?)
+      if (sourceRange.formulas[1] && sourceRange.formulas[1][0] && String(sourceRange.formulas[1][0]).startsWith("=MAP")) {
+        const sampleText = sourceRange.text[2]?.[0] || "2026-10-28 --- 2026-10-31";
+        sheet.getRange(`${sourceCol}2`).values = [[sampleText]];
+        sourceRange.values[1][0] = sampleText;
+        sourceRange.text[1][0] = sampleText;
+      }
+
+      // B. Sisipkan kolom baru di sebelah kanan (kolom berikutnya bergeser aman)
+      const insertIndex = colLetterToIndex(insertAfterCol) + 1;
+      const insertColLetter = indexToColLetter(insertIndex);
+      const endInsertColLetter = indexToColLetter(insertIndex + count - 1);
+
+      const insertRange = sheet.getRange(`${insertColLetter}:${endInsertColLetter}`);
+      insertRange.insert(Excel.InsertShiftDirection.right);
+      await context.sync();
+
+      // C. Tulis Header baru di baris 1
+      const headerRange = sheet.getRange(`${insertColLetter}1:${endInsertColLetter}1`);
+      headerRange.values = [newHeaders];
+      headerRange.format.font.bold = true;
+      headerRange.format.font.color = "#ffffff";
+      headerRange.format.fill.color = "#001a41"; // Deep Navy Telkomsel
+
+      // D. Ekstrak data untuk seluruh baris
+      const transformedRows = [];
+      const numRows = sourceRange.values.length;
+
+      for (let r = 1; r < numRows; r++) {
+        const val = sourceRange.text[r]?.[0] || sourceRange.values[r]?.[0] || "";
+        const strVal = String(val).trim();
+
+        if (!strVal || strVal === '""' || strVal === "#NAME?") {
+          transformedRows.push(new Array(count).fill(""));
+          continue;
+        }
+
+        let extracted = [];
+        if (action.extractType === "dates" || strVal.match(/\d{4}/)) {
+          // Format rentang tanggal (YYYY-MM-DD atau sejenisnya)
+          const dates = strVal.match(/\d{4}[-/.]\d{1,2}[-/.]\d{1,2}/g);
+          if (dates && dates.length >= 2) {
+            extracted = [dates[0], dates[1]];
+          } else if (dates && dates.length === 1) {
+            extracted = [dates[0], dates[0]];
+          } else {
+            const parts = strVal.split(/---|–|-|s\/d|\sto\s/i).map(s => s.trim());
+            extracted = [parts[0] || "", parts[1] || ""];
+          }
+        } else {
+          // Format delimiter umum (spasi, strip, koma)
+          const delim = action.delimiter || " ";
+          const parts = strVal.split(delim).map(s => s.trim());
+          extracted = parts.slice(0, count);
+        }
+
+        while (extracted.length < count) extracted.push("");
+        transformedRows.push(extracted);
+      }
+
+      // E. Tulis hasil pecahan data ke kolom baru
+      if (transformedRows.length > 0) {
+        const dataRange = sheet.getRange(`${insertColLetter}2:${endInsertColLetter}${1 + transformedRows.length}`);
+        dataRange.values = transformedRows;
+        rowCountProcessed = transformedRows.length;
+      }
+
+      // F. Auto-fit lebar kolom
+      const newColsRange = sheet.getRange(`${insertColLetter}:${endInsertColLetter}`);
+      newColsRange.format.autofitColumns();
+
+      await context.sync();
+    });
+
+    return {
+      success: true,
+      summary: `Berhasil menyisipkan ${count} kolom baru (${newHeaders.join(", ")}) dan memecah ${rowCountProcessed} baris data langsung di sheet!`
+    };
+  },
+
+  // 2. Sisipkan Kolom Baru dengan Data Terhitung
+  async insertColumnWithData(action) {
+    const insertAfterCol = (action.insertAfterColumn || "C").toUpperCase();
+    const header = action.header || "Kolom Baru";
+    const values = action.values || [];
+
+    await Excel.run(async (context) => {
+      const sheet = context.workbook.worksheets.getActiveWorksheet();
+      const insertIndex = colLetterToIndex(insertAfterCol) + 1;
+      const colLetter = indexToColLetter(insertIndex);
+
+      sheet.getRange(`${colLetter}:${colLetter}`).insert(Excel.InsertShiftDirection.right);
+      await context.sync();
+
+      const headerCell = sheet.getRange(`${colLetter}1`);
+      headerCell.values = [[header]];
+      headerCell.format.font.bold = true;
+      headerCell.format.font.color = "#ffffff";
+      headerCell.format.fill.color = "#001a41";
+
+      if (values.length > 0) {
+        const dataRange = sheet.getRange(`${colLetter}2:${colLetter}${1 + values.length}`);
+        dataRange.values = values.map(v => Array.isArray(v) ? v : [v]);
+      }
+
+      sheet.getRange(`${colLetter}:${colLetter}`).format.autofitColumns();
+      await context.sync();
+    });
+
+    return { success: true, summary: `Kolom "${header}" berhasil disisipkan langsung ke sheet!` };
+  },
+
+  // 3. Sisipkan Kolom Rumus Bersih (Tidak menimpa data asli)
+  async insertFormulaColumn(action) {
+    const insertAfterCol = (action.insertAfterColumn || "C").toUpperCase();
+    const header = action.header || "Hasil Kalkulasi";
+    const formula = action.formula;
+
+    await Excel.run(async (context) => {
+      const sheet = context.workbook.worksheets.getActiveWorksheet();
+      const usedRange = sheet.getUsedRange();
+      usedRange.load(["rowCount", "rowIndex"]);
+      await context.sync();
+
+      const lastRow = Math.max(usedRange.rowIndex + usedRange.rowCount, 10);
+      const limitRows = Math.min(lastRow, 5000);
+
+      const insertIndex = colLetterToIndex(insertAfterCol) + 1;
+      const colLetter = indexToColLetter(insertIndex);
+
+      sheet.getRange(`${colLetter}:${colLetter}`).insert(Excel.InsertShiftDirection.right);
+      await context.sync();
+
+      const headerCell = sheet.getRange(`${colLetter}1`);
+      headerCell.values = [[header]];
+      headerCell.format.font.bold = true;
+      headerCell.format.font.color = "#ffffff";
+      headerCell.format.fill.color = "#001a41";
+
+      if (limitRows >= 2 && formula) {
+        const formulaRange = sheet.getRange(`${colLetter}2:${colLetter}${limitRows}`);
+        formulaRange.formulas = new Array(limitRows - 1).fill([formula]);
+      }
+
+      sheet.getRange(`${colLetter}:${colLetter}`).format.autofitColumns();
+      await context.sync();
+    });
+
+    return { success: true, summary: `Kolom rumus "${header}" berhasil ditambahkan dan diaplikasikan!` };
+  },
+
+  // 4. Update / Modifikasi Kolom In-Place
+  async updateColumn(action) {
+    const targetCol = (action.targetColumn || "B").toUpperCase();
+    const op = action.operation || "proper_case";
+
+    await Excel.run(async (context) => {
+      const sheet = context.workbook.worksheets.getActiveWorksheet();
+      const usedRange = sheet.getUsedRange();
+      usedRange.load(["rowCount", "rowIndex"]);
+      await context.sync();
+
+      const limitRows = Math.min(usedRange.rowIndex + usedRange.rowCount, 5000);
+      const range = sheet.getRange(`${targetCol}2:${targetCol}${limitRows}`);
+      range.load(["values"]);
+      await context.sync();
+
+      const updated = range.values.map(row => {
+        const val = row[0];
+        if (typeof val !== "string") return [val];
+        if (op === "proper_case") return [val.toLowerCase().replace(/\b\w/g, c => c.toUpperCase())];
+        if (op === "uppercase") return [val.toUpperCase()];
+        if (op === "lowercase") return [val.toLowerCase()];
+        return [val.trim().replace(/\s+/g, " ")];
+      });
+
+      range.values = updated;
+      range.format.autofitColumns();
+      await context.sync();
+    });
+
+    return { success: true, summary: `Kolom ${targetCol} berhasil diperbarui di worksheet!` };
+  },
+
+  // 5. Tulis Matriks Range
+  async writeRange(action) {
+    const values = action.values || [];
+    if (!values || values.length === 0) return;
+
+    await writeValuesToSelection(values);
+    return { success: true, summary: `${values.length} baris data berhasil ditulis ke sheet!` };
+  },
+
+  // Dispatcher Utama
+  async executeAction(action) {
+    if (!action) return null;
+    const actType = action.action || "";
+    if (actType === "split_column") return await this.splitColumn(action);
+    if (actType === "insert_column_with_data") return await this.insertColumnWithData(action);
+    if (actType === "insert_formula_column") return await this.insertFormulaColumn(action);
+    if (actType === "update_column") return await this.updateColumn(action);
+    if (actType === "write_range" || actType === "write") return await this.writeRange(action);
+    if (actType === "formula" && action.formula) {
+      // Jika model lama mengembalikan action "formula", jangan tiban sel aktif melainkan sisipkan kolom baru yang aman
+      return await this.insertFormulaColumn({
+        insertAfterColumn: "C",
+        header: "Hasil Rumus",
+        formula: action.formula
+      });
+    }
+    return null;
+  }
+};
+
 // Initialize Office.js
 Office.onReady((info) => {
   if (info.host === Office.HostType.Excel) {
     initApp();
   } else {
-    // Running in standalone browser preview
     document.getElementById("active-range-label").innerText = "Browser Preview";
     initAppEvents();
   }
@@ -32,10 +304,8 @@ function initApp() {
   updateSettingsUI();
   initAppEvents();
 
-  // Initial read of active selection
   readActiveSelection();
 
-  // Register live listener for Excel selection change
   Excel.run(async (context) => {
     context.workbook.onSelectionChanged.add(onSelectionChange);
     await context.sync();
@@ -44,12 +314,10 @@ function initApp() {
   });
 }
 
-// Event handler when selection changes in Excel
 async function onSelectionChange() {
   await readActiveSelection();
 }
 
-// Read active selected range and rich worksheet metadata safely & instantly
 async function readActiveSelection() {
   const rangeLabel = document.getElementById("active-range-label");
   const countLabel = document.getElementById("active-cells-count");
@@ -57,7 +325,6 @@ async function readActiveSelection() {
 
   try {
     await Excel.run(async (context) => {
-      // 1. Fase Cepat: Muat address & nama sheet langsung (< 5ms)
       const range = context.workbook.getSelectedRange();
       range.load(["address", "rowCount", "columnCount"]);
 
@@ -69,7 +336,6 @@ async function readActiveSelection() {
 
       await context.sync();
 
-      // Langsung update tampilan UI agar TIDAK STUCK di "Memuat..."
       if (rangeLabel) rangeLabel.innerText = range.address;
       if (sheetBadge) sheetBadge.innerText = sheet.name;
       const totalCells = (range.rowCount || 1) * (range.columnCount || 1);
@@ -91,7 +357,6 @@ async function readActiveSelection() {
         sampleData: []
       };
 
-      // 2. Fase Sel: Ambil nilai sel aman (hindari crash jika user blok seluruh kolom)
       try {
         if (totalCells <= 200) {
           range.load(["values", "formulas"]);
@@ -99,7 +364,6 @@ async function readActiveSelection() {
           currentSelection.values = range.values;
           currentSelection.formulas = range.formulas;
         } else {
-          // Range besar (misal 1 kolom penuh 1 juta baris): ambil 10 baris pertama saja
           const previewRows = Math.min(range.rowCount, 10);
           const previewCols = Math.min(range.columnCount, 10);
           const previewRange = range.getResizedRange(previewRows - 1, previewCols - 1);
@@ -112,7 +376,6 @@ async function readActiveSelection() {
         console.warn("Could not load cell values:", cellErr);
       }
 
-      // 3. Fase Header & Struktur Data: Baca baris 1-3 tanpa scan seluruh 200rb baris
       try {
         const topRange = sheet.getRange("A1:AZ3");
         topRange.load(["values"]);
@@ -151,9 +414,7 @@ async function readActiveSelection() {
   }
 }
 
-// UI Setup & Tab Switching
 function initAppEvents() {
-  // Tabs
   document.querySelectorAll(".tab-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
       const targetId = btn.getAttribute("data-tab");
@@ -170,7 +431,6 @@ function initAppEvents() {
     });
   });
 
-  // Settings Panel Open/Close
   const settingsBtn = document.getElementById("btn-tab-settings");
   const closeSettingsBtn = document.getElementById("btn-close-settings");
   if (settingsBtn) {
@@ -186,11 +446,9 @@ function initAppEvents() {
     };
   }
 
-  // Refresh Selection Button
   const refreshBtn = document.getElementById("btn-refresh-selection");
   if (refreshBtn) refreshBtn.onclick = readActiveSelection;
 
-  // Quick Prompt Pills
   document.querySelectorAll(".quick-pill").forEach((pill) => {
     pill.addEventListener("click", () => {
       const prompt = pill.getAttribute("data-prompt");
@@ -202,7 +460,6 @@ function initAppEvents() {
     });
   });
 
-  // Chat Send
   const sendBtn = document.getElementById("btn-send-chat");
   const chatInput = document.getElementById("chat-input");
   if (sendBtn) sendBtn.onclick = sendMessage;
@@ -215,50 +472,42 @@ function initAppEvents() {
     });
   }
 
-  // Settings Provider change
   const providerSelect = document.getElementById("setting-provider");
   if (providerSelect) {
     providerSelect.onchange = (e) => toggleSettingsInputs(e.target.value);
   }
 
-  // Save Settings
   const saveSettingsBtn = document.getElementById("btn-save-settings");
   if (saveSettingsBtn) {
     saveSettingsBtn.onclick = saveSettings;
   }
 
-  // Formula Builder Events
   initFormulaEvents();
-
-  // Data Cleaner Events
   initCleanerEvents();
 }
 
 // ==========================================
-// CHAT FUNCTIONALITY
+// CHAT FUNCTIONALITY & AGENT DISPATCH
 // ==========================================
 async function sendMessage() {
   const input = document.getElementById("chat-input");
   const prompt = input.value.trim();
   if (!prompt) return;
 
-  // Add User Message
   appendChatMessage("user", prompt);
   input.value = "";
 
-  // Add to chat history
   chatHistory.push({ role: "user", text: prompt });
   if (chatHistory.length > 12) chatHistory = chatHistory.slice(-12);
 
-  // Loading state
-  const loadingId = appendChatMessage("ai", "Sedang memproses instruksi dengan AI...");
+  const loadingId = appendChatMessage("ai", "Sedang memproses dan menganalisis lembar kerja dengan AI Agent...");
 
   try {
     const payload = {
       prompt,
       excelContext: currentSelection,
       settings: settings,
-      chatHistory: chatHistory.slice(0, -1) // kirim riwayat sebelumnya
+      chatHistory: chatHistory.slice(0, -1)
     };
 
     const res = await fetch("/api/chat", {
@@ -275,24 +524,46 @@ async function sendMessage() {
       return;
     }
 
-    // Simpan balasan model ke riwayat obrolan
     if (data.reply) {
       chatHistory.push({ role: "model", text: data.reply });
       if (chatHistory.length > 12) chatHistory = chatHistory.slice(-12);
     }
 
-    // Render AI Reply
-    appendChatMessage("ai", data.reply, data.structuredAction);
+    // Render AI Reply with Agent Card
+    const msgId = appendChatMessage("ai", data.reply, data.structuredAction);
 
-    // Auto-write check
+    // Auto-execute check (Default Aktif)
     const autoWrite = document.getElementById("chk-auto-write")?.checked;
     if (autoWrite && data.structuredAction) {
-      if (data.structuredAction.action === "write" && data.structuredAction.values) {
-        await writeValuesToSelection(data.structuredAction.values);
-        showToast("✅ Data berhasil ditulis otomatis ke sheet!");
-      } else if (data.structuredAction.action === "formula" && data.structuredAction.formula) {
-        await applyFormulaToSelection(data.structuredAction.formula);
-        showToast("✅ Rumus berhasil diaplikasikan ke cell aktif!");
+      const agentBadge = document.getElementById(`agent-badge-${msgId}`);
+      const btnRun = document.getElementById(`btn-agent-run-${msgId}`);
+
+      if (agentBadge) {
+        agentBadge.innerText = "⚡ Sedang Dikerjakan di Sheet...";
+        agentBadge.className = "text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded-full font-medium animate-pulse";
+      }
+
+      try {
+        const result = await ExcelAgent.executeAction(data.structuredAction);
+        if (result && result.success) {
+          if (agentBadge) {
+            agentBadge.innerText = "✅ Selesai Dikerjakan di Sheet";
+            agentBadge.className = "text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded-full font-medium";
+          }
+          if (btnRun) {
+            btnRun.innerText = "✓ Sudah Diterapkan Langsung di Sheet";
+            btnRun.disabled = true;
+            btnRun.className = "bg-emerald-950 text-emerald-300 font-semibold px-3 py-1.5 rounded-lg text-xs cursor-default border border-emerald-800";
+          }
+          showToast(result.summary || "Operasi selesai langsung di worksheet!");
+        }
+      } catch (err) {
+        console.error("Agent Execution Error:", err);
+        if (agentBadge) {
+          agentBadge.innerText = "⚠️ Gagal Eksekusi";
+          agentBadge.className = "text-[10px] bg-red-500/20 text-red-300 border border-red-500/40 px-2 py-0.5 rounded-full font-medium";
+        }
+        showToast("Gagal eksekusi ke sheet: " + err.message);
       }
     }
   } catch (err) {
@@ -313,7 +584,6 @@ function appendChatMessage(sender, text, structuredAction = null) {
   } else {
     msgEl.className = "bg-white text-slate-800 border border-slate-200 p-3.5 rounded-xl text-xs shadow-xs space-y-2.5";
 
-    // Clean any residual raw json block from text
     const cleanText = (text || "").replace(/```(?:json)?\s*[\s\S]*?\s*```/g, "").trim();
 
     const wrapper = document.createElement("div");
@@ -331,77 +601,66 @@ function appendChatMessage(sender, text, structuredAction = null) {
     wrapper.appendChild(bodyEl);
     msgEl.appendChild(wrapper);
 
-    // Interactive Action Cards (Telkomsel style)
+    // Interactive Agent Card
     if (structuredAction) {
-      if (structuredAction.action === "formula" && structuredAction.formula) {
-        const formulaCard = document.createElement("div");
-        formulaCard.className = "mt-3 p-3 rounded-lg bg-red-50/70 border border-red-200 space-y-2";
-        
-        formulaCard.innerHTML = `
-          <div class="flex items-center justify-between text-[11px] font-semibold text-[#b91c1c]">
-            <span class="flex items-center space-x-1"><span>⚡</span> <span>Rekomendasi Rumus Excel</span></span>
-            <span class="text-[10px] bg-red-100 text-[#b91c1c] px-1.5 py-0.5 rounded font-mono font-bold">Formula</span>
-          </div>
-          <div class="p-2 bg-white rounded border border-red-200 font-mono text-[11px] text-slate-900 select-all overflow-x-auto">${escapeHtml(structuredAction.formula)}</div>
-          <div class="flex items-center space-x-2 pt-1">
-            <button class="btn-card-apply flex-1 bg-[#ed0226] hover:bg-[#c80220] text-white py-1.5 px-3 rounded text-[11px] font-semibold transition flex items-center justify-center space-x-1 shadow-xs">
-              <span>⚡ Terapkan ke Sel Aktif</span>
-            </button>
-            <button class="btn-card-copy bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 py-1.5 px-3 rounded text-[11px] font-medium transition">
-              <span>📋 Salin</span>
-            </button>
-          </div>
-        `;
+      const card = document.createElement("div");
+      card.className = "mt-3 p-3 rounded-xl bg-[#001a41] border border-[#002b66] text-white space-y-2 shadow-sm";
 
-        formulaCard.querySelector(".btn-card-apply").onclick = async () => {
-          await applyFormulaToSelection(structuredAction.formula);
-          showToast("✅ Rumus berhasil dimasukkan ke sel aktif!");
-        };
+      let title = "⚡ AI Agent: Tindakan Lembar Kerja";
+      if (structuredAction.action === "split_column") title = "⚡ AI Agent: Pecah Kolom Otomatis";
+      else if (structuredAction.action === "insert_formula_column") title = "⚡ AI Agent: Sisipkan Kolom Rumus";
+      else if (structuredAction.action === "insert_column_with_data") title = "⚡ AI Agent: Tambah Kolom Data";
+      else if (structuredAction.action === "update_column") title = "⚡ AI Agent: Pembersihan Format";
 
-        formulaCard.querySelector(".btn-card-copy").onclick = () => {
-          navigator.clipboard.writeText(structuredAction.formula);
-          showToast("📋 Rumus disalin ke clipboard!");
-        };
-
-        msgEl.appendChild(formulaCard);
-      } else if (structuredAction.action === "write" && structuredAction.values) {
-        const writeCard = document.createElement("div");
-        writeCard.className = "mt-3 p-3 rounded-lg bg-slate-50 border border-slate-200 space-y-2";
-        
-        writeCard.innerHTML = `
-          <div class="flex items-center justify-between text-[11px] font-semibold text-[#001a41]">
-            <span class="flex items-center space-x-1"><span>📊</span> <span>Data Hasil Komputasi</span></span>
-            <span class="text-[10px] bg-slate-200 text-[#001a41] px-1.5 py-0.5 rounded font-mono font-bold">Write</span>
+      card.innerHTML = `
+        <div class="flex items-center justify-between">
+          <div class="flex items-center space-x-1.5 text-xs font-bold text-white">
+            <span class="text-emerald-400">⚡</span>
+            <span>${title}</span>
           </div>
-          <p class="text-[11px] text-slate-600">Terdapat ${structuredAction.values.length} baris data yang siap dituliskan ke worksheet.</p>
-          <button class="btn-card-write w-full bg-[#001a41] hover:bg-[#002b66] text-white py-1.5 px-3 rounded text-[11px] font-semibold transition flex items-center justify-center space-x-1 shadow-xs">
-            <span>📥 Tulis Data ke Sheet</span>
+          <span id="agent-badge-${msgId}" class="text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-0.5 rounded-full font-medium">
+            Siap Diterapkan
+          </span>
+        </div>
+        <p class="text-[11px] text-slate-300 leading-relaxed font-sans">
+          ${escapeHtml(structuredAction.thought || "AI Agent siap mengeksekusi operasi langsung di spreadsheet Anda.")}
+        </p>
+        <div class="pt-1 flex items-center space-x-2">
+          <button id="btn-agent-run-${msgId}" class="bg-[#ed0226] hover:bg-[#c80220] text-white font-semibold px-3 py-1.5 rounded-lg text-xs flex items-center space-x-1.5 shadow-xs transition">
+            <span>▶️ Terapkan ke Sheet</span>
           </button>
-        `;
+        </div>
+      `;
 
-        writeCard.querySelector(".btn-card-write").onclick = async () => {
-          await writeValuesToSelection(structuredAction.values);
-          showToast("✅ Data berhasil ditulis ke sheet!");
-        };
+      card.querySelector(`#btn-agent-run-${msgId}`).onclick = async () => {
+        const btn = card.querySelector(`#btn-agent-run-${msgId}`);
+        const badge = card.querySelector(`#agent-badge-${msgId}`);
+        btn.innerText = "Sedang Menerapkan...";
+        btn.disabled = true;
 
-        msgEl.appendChild(writeCard);
-      }
+        try {
+          const res = await ExcelAgent.executeAction(structuredAction);
+          if (res && res.success) {
+            badge.innerText = "✅ Selesai di Sheet";
+            badge.className = "text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded-full font-medium";
+            btn.innerText = "✓ Sudah Diterapkan Langsung di Sheet";
+            btn.className = "bg-emerald-950 text-emerald-300 font-semibold px-3 py-1.5 rounded-lg text-xs cursor-default border border-emerald-800";
+            showToast(res.summary);
+          }
+        } catch (e) {
+          btn.innerText = "Coba Lagi";
+          btn.disabled = false;
+          showToast("Gagal: " + e.message);
+        }
+      };
+
+      msgEl.appendChild(card);
     }
   }
 
   container.appendChild(msgEl);
   container.scrollTop = container.scrollHeight;
   return msgId;
-}
-
-function escapeHtml(str) {
-  return (str || "").replace(/[&<>"']/g, (m) => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#039;"
-  })[m]);
 }
 
 function removeChatMessage(id) {
@@ -421,12 +680,12 @@ function initFormulaEvents() {
       const desc = document.getElementById("formula-desc-input");
       if (type === "xlookup") desc.value = "Cari nilai di kolom B berdasarkan kunci di sel A2 dari sheet Data";
       else if (type === "sumifs") desc.value = "Jumlahkan kolom Total jika status adalah 'Completed' dan cabang adalah 'Jakarta'";
-      else if (type === "if") desc.value = "Jika nilai > 80 maka 'Lulus', jika tidak maka 'Remedial'";
-      else if (type === "text") desc.value = "Gabungkan Nama Depan di A2 dan Nama Belakang di B2 dengan spasi";
+      else if (type === "if-nested") desc.value = "Jika nilai > 80 maka 'Lulus', jika tidak maka 'Remedial'";
+      else if (type === "text-join") desc.value = "Gabungkan Nama Depan di A2 dan Nama Belakang di B2 dengan spasi";
     });
   });
 
-  const btnGen = document.getElementById("btn-generate-formula");
+  const btnGen = document.getElementById("btn-generate-custom-formula");
   if (btnGen) {
     btnGen.onclick = async () => {
       const desc = document.getElementById("formula-desc-input").value.trim();
@@ -440,7 +699,7 @@ function initFormulaEvents() {
 
       try {
         const payload = {
-          prompt: `Buatkan hanya 1 rumus Excel resmi untuk: ${desc}. Sertakan JSON action {"action": "formula", "formula": "=..."}`,
+          prompt: `Buatkan hanya 1 rumus Excel resmi untuk: ${desc}. Sertakan JSON action {"action": "insert_formula_column", "header": "Hasil", "formula": "=..."}`,
           excelContext: currentSelection,
           settings: settings
         };
@@ -456,35 +715,38 @@ function initFormulaEvents() {
         if (data.structuredAction && data.structuredAction.formula) {
           formulaText = data.structuredAction.formula;
         } else {
-          // Extract regex
           const m = data.reply.match(/(=[A-Z]+[^\n`]+)/);
           if (m) formulaText = m[1];
         }
 
         document.getElementById("formula-result-container").classList.remove("hidden");
-        document.getElementById("generated-formula-text").innerText = formulaText;
+        document.getElementById("formula-result-code").innerText = formulaText;
       } catch (e) {
         showToast("Gagal generate rumus: " + e.message);
       } finally {
-        btnGen.innerText = "⚡ Generate Rumus Excel";
+        btnGen.innerText = "✨ Buat Rumus Sekarang";
         btnGen.disabled = false;
       }
     };
   }
 
-  const btnApply = document.getElementById("btn-apply-formula");
+  const btnApply = document.getElementById("btn-apply-formula-box");
   if (btnApply) {
     btnApply.onclick = async () => {
-      const formula = document.getElementById("generated-formula-text").innerText.trim();
-      await applyFormulaToSelection(formula);
-      showToast("Rumus berhasil dimasukkan ke cell aktif!");
+      const formula = document.getElementById("formula-result-code").innerText.trim();
+      await ExcelAgent.insertFormulaColumn({
+        insertAfterColumn: "C",
+        header: "Hasil Rumus",
+        formula: formula
+      });
+      showToast("Kolom rumus berhasil ditambahkan ke worksheet!");
     };
   }
 
-  const btnCopy = document.getElementById("btn-copy-formula");
+  const btnCopy = document.getElementById("btn-copy-formula-box");
   if (btnCopy) {
     btnCopy.onclick = () => {
-      const formula = document.getElementById("generated-formula-text").innerText.trim();
+      const formula = document.getElementById("formula-result-code").innerText.trim();
       navigator.clipboard.writeText(formula);
       showToast("Rumus disalin ke clipboard!");
     };
@@ -515,7 +777,7 @@ function initCleanerEvents() {
     showToast("Diubah ke lowercase!");
   });
 
-  document.getElementById("btn-format-idr")?.addEventListener("click", async () => {
+  document.getElementById("btn-clean-currency")?.addEventListener("click", async () => {
     await Excel.run(async (context) => {
       const range = context.workbook.getSelectedRange();
       range.numberFormat = [["Rp#,##0;[Red](Rp#,##0);\"-\""]];
@@ -524,7 +786,7 @@ function initCleanerEvents() {
     showToast("Format Rupiah (IDR) diterapkan!");
   });
 
-  document.getElementById("btn-format-autofit")?.addEventListener("click", async () => {
+  document.getElementById("btn-clean-autofit")?.addEventListener("click", async () => {
     await Excel.run(async (context) => {
       const range = context.workbook.getSelectedRange();
       range.format.autofitColumns();
@@ -548,7 +810,7 @@ function initCleanerEvents() {
     showToast("Cell kosong telah diisi '-'!");
   });
 
-  document.getElementById("btn-format-table")?.addEventListener("click", async () => {
+  document.getElementById("btn-clean-table")?.addEventListener("click", async () => {
     await Excel.run(async (context) => {
       const range = context.workbook.getSelectedRange();
       context.workbook.tables.add(range, true);
@@ -576,9 +838,6 @@ async function transformSelectedText(fn) {
   }
 }
 
-// ==========================================
-// EXCEL OFFICE.JS EXECUTION HELPERS
-// ==========================================
 async function writeValuesToSelection(values) {
   try {
     await Excel.run(async (context) => {
@@ -602,18 +861,6 @@ async function writeValuesToSelection(values) {
     });
   } catch (err) {
     showToast("Gagal menulis ke Excel: " + err.message);
-  }
-}
-
-async function applyFormulaToSelection(formula) {
-  try {
-    await Excel.run(async (context) => {
-      const range = context.workbook.getSelectedRange();
-      range.formulas = [[formula]];
-      await context.sync();
-    });
-  } catch (err) {
-    showToast("Gagal menerapkan rumus: " + err.message);
   }
 }
 

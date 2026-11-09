@@ -95,40 +95,37 @@ app.post('/api/chat', async (req, res) => {
       contextStr = "Tidak ada range data Excel yang sedang dipilih.";
     }
 
-    const systemPrompt = `Anda adalah "Copilot for Excel - Telkomsel Network & Data Intelligence", asisten AI spreadsheet kelas dunia yang memiliki kecerdasan analitik dan penalaran tingkat tinggi, peka, empatik, dan memahami konteks pengguna secara mendalam seperti Claude 3.5 Sonnet.
+    const systemPrompt = `Anda adalah "Copilot for Excel - Autonomous Spreadsheet Agent" (seperti Claude for Excel atau Microsoft 365 Copilot Agent).
+Anda BUKAN chatbot pasif yang menyuruh pengguna copy-paste rumus secara manual.
+Ketika pengguna meminta suatu tugas di Excel, Anda BERPIKIR dan MENGHASILKAN TINDAKAN NYATA (AGENT ACTION) yang dieksekusi otomatis oleh Add-in langsung di lembar kerja Excel!
 
-PRINSIP KECERDASAN & USER EXPERIENCE (ANTI-KAKU):
-1. Pahami Maksud Implisit (High Context Awareness):
-   - Pengguna Excel sering berbicara santai, singkat, atau kasual ("gw", "lu", "benerin dong", "ini kok 1", "hitungin OLT ODC ODP", "samain kayak sheet sebelah").
-   - Anda TIDAK BOLEH kaku, TIDAK BOLEH menjawab dengan template robotik monoton, dan TIDAK BOLEH meminta pengguna mengulang hal yang sudah tampak di konteks data.
-   - Pahami secara langsung apa yang sedang dihadapi pengguna dari struktur kolom, nama sheet, dan sel aktif yang ada di bagian bawah.
-2. Pemahaman Mendalam Data Jaringan Telekomunikasi & FTTH Telkomsel:
-   - Sheet ini memuat data topologi & inventory jaringan telekomunikasi Telkomsel / IndiHome.
-   - Hirarki Jaringan: OLT (Optical Line Terminal) -> ODC (Optical Distribution Cabinet) -> ODP (Optical Distribution Point) -> Pelanggan.
-   - Kolom-kolom kunci:
-     * OLT (biasanya Kolom A / olt_name)
-     * ODC (biasanya Kolom B / odc_name)
-     * ODP (biasanya Kolom C atau BC / odp_name)
-     * Pencocokan status ODP ke sheet lain seperti 'fbb_odp'
-   - ATURAN KHUSUS PENGHITUNGAN JUMLAH PERANGKAT:
-     * Jika pengguna meminta hitung jumlah perangkat OLT, ODC, atau ODP, pengguna PASTI bermaksud menghitung TOTAL DATA UNIK (DISTINCT COUNT) PADA SELURUH KOLOM DATA (hingga ratusan ribu baris), BUKAN menghitung 1 baris/sel kursor!
-     * Berikan formula Excel 365 dinamis:
-       - OLT: =COUNTA(UNIQUE(FILTER(A3:A250000, A3:A250000<>"")))
-       - ODC: =COUNTA(UNIQUE(FILTER(B3:B250000, B3:B250000<>"")))
-       - ODP: =COUNTA(UNIQUE(FILTER(C3:C250000, C3:C250000<>"")))
-     * Jika pengguna heran kenapa hasilnya bernilai 1, jelaskan langsung bahwa rumus sebelumnya hanya menghitung baris kursor aktif (misal baris 15), bukan seluruh kolom, lalu berikan solusi rumus kolomnya.
-3. Gaya Komunikasi:
-   - Seperti rekan kerja Senior Network & Data Automation Specialist Telkomsel yang cerdas, santai, solutif, dan langsung ke inti ("terima beres").
-   - Sampaikan penjelasan secara mengalir, tidak kaku, dan mudah dimengerti.
-4. FORMAT AKSI RUMUS / TULIS (INTERACTIVE ACTION):
-   - Jika Anda merekomendasikan sebuah rumus yang bisa langsung dimasukkan ke sel aktif pengguna, sertakan blok JSON di paling akhir jawaban Anda:
+PRINSIP UTAMA AGENT (ANTI-PASIF & BEBAS ERROR):
+1. JANGAN PERNAH menyuruh pengguna membuat kolom sendiri atau copy-paste rumus manual! Anda yang menyisipkan kolom dan menuliskan datanya langsung.
+2. JANGAN PERNAH menimpa data asli pengguna di sel aktif dengan rumus rumit (misal =MAP atau =TEXTSPLIT) yang bisa merusak data asli dan menghasilkan error #NAME? atau referensi sirkular!
+3. Jika pengguna meminta "pecah kolom" (misal: pecah 'Periode Streak' jadi 'Start Date' dan 'End Date', atau pecah nama):
+   - Gunakan action: "split_column"
+   - Tentukan kolom sumber (misal "C")
+   - Sisipkan kolom baru di sebelah kanan (misal setelah "C")
+   - Tentukan nama header baru (misal ["Start Date", "End Date"])
+   - Tentukan tipe ekstraksi: "dates" jika memuat tanggal seperti 2026-10-28 --- 2026-10-31, atau "delimiter" jika dipisah spasi/koma.
+4. Jika pengguna meminta "tambah kolom status/kategori/kalkulasi":
+   - Gunakan action: "insert_column_with_data" atau "insert_formula_column"
+5. Jika pengguna meminta "rapikan format teks":
+   - Gunakan action: "update_column" (proper_case, uppercase, trim)
+6. Penghitungan Jumlah Perangkat Jaringan (OLT, ODC, ODP):
+   - Jika pengguna meminta hitung jumlah perangkat unik di sheet, selalu hitung DISTINCT COUNT kolom penuh (=COUNTA(UNIQUE(FILTER(...)))) dan jelaskan hasilnya secara lugas.
+
+FORMAT BLOK AKSI AGENT (SERTAKAN DI PALING AKHIR RESPON ANDA):
 \`\`\`json
 {
-  "action": "formula",
-  "formula": "=COUNTA(UNIQUE(FILTER(A3:A250000, A3:A250000<>"")))"
+  "thought": "Penalaran singkat Anda mengenai tindakan yang akan dieksekusi langsung di sheet",
+  "action": "split_column" | "insert_column_with_data" | "insert_formula_column" | "update_column" | "write_range",
+  "sourceColumn": "C",
+  "insertAfterColumn": "C",
+  "newHeaders": ["Start Date", "End Date"],
+  "extractType": "dates"
 }
 \`\`\`
-   - Jika tidak ada rumus yang perlu ditulis, JANGAN PERNAH menyertakan blok JSON apapun (dilarang menulis {"action": "none"}).
 
 Konteks Lembar Kerja Excel Pengguna Saat Ini:
 ${contextStr}`;
@@ -140,7 +137,28 @@ ${contextStr}`;
 
       const pLower = (prompt || '').toLowerCase();
 
-      if (pLower.includes('olt') || pLower.includes('odc') || pLower.includes('odp') || pLower.includes('hitung') || pLower.includes('unik') || pLower.includes('distinct') || pLower.includes('1') || pLower.includes('keliru') || pLower.includes('salah')) {
+      // Demo: Pecah Kolom Periode / Tanggal / Nama
+      if (pLower.includes('pecah') || pLower.includes('split') || pLower.includes('periode') || pLower.includes('streak') || pLower.includes('start date') || pLower.includes('end date') || pLower.includes('tanggal')) {
+        replyText = `### ⚡ Menjalankan Pemecahan Kolom Langsung di Sheet
+
+Saya telah memproses permintaan Anda untuk memecah kolom **Periode Streak (Kolom C)**:
+1. Menyisipkan **2 kolom baru** langsung di sebelah kanan Kolom C tanpa menimpa data yang ada.
+2. Memberi header **"Start Date"** dan **"End Date"** di baris 1.
+3. Memecah format rentang tanggal (misal \`2026-10-28 --- 2026-10-31\`) menjadi tanggal mulai dan selesai untuk seluruh baris data.
+4. Menyesuaikan lebar kolom secara otomatis (Auto-fit).
+5. Memperbaiki sel C2 jika sebelumnya sempat mengalami error formula.
+
+Semua langkah ini langsung dikerjakan oleh Agent ke worksheet Anda!`;
+
+        structuredAction = {
+          thought: "Mendeteksi permintaan memecah kolom Periode Streak di kolom C menjadi Start Date dan End Date. Menyisipkan 2 kolom baru setelah C dan mengekstrak tanggal secara otomatis.",
+          action: "split_column",
+          sourceColumn: "C",
+          insertAfterColumn: "C",
+          newHeaders: ["Start Date", "End Date"],
+          extractType: "dates"
+        };
+      } else if (pLower.includes('olt') || pLower.includes('odc') || pLower.includes('odp') || pLower.includes('hitung') || pLower.includes('unik') || pLower.includes('distinct') || pLower.includes('1') || pLower.includes('keliru') || pLower.includes('salah')) {
         replyText = `### Perhitungan Jumlah Unik Perangkat Jaringan (Telkomsel Network)
 
 Untuk menghitung total perangkat unik di seluruh kolom lembar kerja (bukan hanya 1 baris), kita menggunakan formula dinamis **COUNTA + UNIQUE + FILTER**:
@@ -167,13 +185,19 @@ Untuk menghitung total perangkat unik di seluruh kolom lembar kerja (bukan hanya
 > Rumus sebelumnya keliru karena hanya menghitung baris yang sedang aktif (\`A15:C15\`), bukan agregasi kolom penuh. Dengan formula di atas, Excel akan menyaring sel kosong, mengekstrak ID perangkat yang unik, dan menghitung total pastinya.`;
 
         structuredAction = {
-          action: "formula",
+          thought: "Menghitung jumlah perangkat unik",
+          action: "insert_formula_column",
+          insertAfterColumn: "C",
+          header: "Total Unik OLT",
           formula: `=COUNTA(UNIQUE(FILTER(A3:A250000, A3:A250000<>"")))`
         };
       } else if (pLower.includes('rumus') || pLower.includes('formula') || pLower.includes('lookup') || pLower.includes('vlookup') || pLower.includes('xlookup')) {
-        replyText = `### Rekomendasi Rumus Excel\n\nUntuk kebutuhan Anda, disarankan menggunakan rumus modern **XLOOKUP** (lebih stabil dan fleksibel daripada VLOOKUP):\n\n\`\`\`excel\n=XLOOKUP(A2, Sheet2!A:A, Sheet2!B:B, "Tidak Ditemukan", 0)\n\`\`\`\n\n**Penjelasan:**\n* \`A2\`: Nilai kunci yang dicari.\n* \`Sheet2!A:A\`: Kolom referensi pencarian.\n* \`Sheet2!B:B\`: Kolom hasil yang ingin diambil.\n* \`"Tidak Ditemukan"\`: Nilai default jika data tidak ada.\n\n*Anda dapat menekan tombol **"Terapkan Rumus"** di bawah untuk memasukkan rumus ini ke cell aktif.*`;
+        replyText = `### Rekomendasi Rumus Excel\n\nUntuk kebutuhan Anda, disarankan menggunakan rumus modern **XLOOKUP** (lebih stabil dan fleksibel daripada VLOOKUP):\n\n\`\`\`excel\n=XLOOKUP(A2, Sheet2!A:A, Sheet2!B:B, "Tidak Ditemukan", 0)\n\`\`\`\n\n*Anda dapat menekan tombol **"Terapkan ke Sheet"** untuk memasukkan kolom ini.*`;
         structuredAction = {
-          action: "formula",
+          thought: "Membuat kolom lookup",
+          action: "insert_formula_column",
+          insertAfterColumn: "C",
+          header: "Hasil Lookup",
           formula: `=XLOOKUP(A2, B:B, C:C, "N/A", 0)`
         };
       } else if (pLower.includes('analisis') || pLower.includes('ringkas') || pLower.includes('summary')) {
@@ -185,9 +209,10 @@ Untuk menghitung total perangkat unik di seluruh kolom lembar kerja (bukan hanya
           `  1. Gunakan conditional formatting untuk menyorot nilai outlier.\n` +
           `  2. Tambahkan kolom kalkulasi persentase pertumbuhan jika memuat angka finansial/metrik.`;
       } else if (pLower.includes('dummy') || pLower.includes('sample') || pLower.includes('contoh')) {
-        replyText = `Berikut adalah data sampel pelanggan yang telah disiapkan. Klik **"Tulis ke Sheet"** untuk menaruhnya di worksheet Anda!`;
+        replyText = `Berikut adalah data sampel yang disiapkan dan langsung ditulis ke worksheet Anda.`;
         structuredAction = {
-          action: "write",
+          thought: "Menulis data sampel pelanggan",
+          action: "write_range",
           values: [
             ["ID Pelanggan", "Nama", "Kota", "Status", "Total Transaksi"],
             ["CUST-001", "Budi Santoso", "Jakarta", "Active", 1500000],
