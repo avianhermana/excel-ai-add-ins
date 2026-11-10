@@ -20,7 +20,7 @@ async function generateCerts() {
   const attrs = [
     { name: 'commonName', value: 'localhost' },
     { name: 'countryName', value: 'ID' },
-    { name: 'organizationName', value: 'Excel Copilot Local Dev' }
+    { name: 'organizationName', value: 'Excel AI Add-ins Local Dev' }
   ];
 
   const pems = await selfsigned.generate(attrs, {

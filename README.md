@@ -1,10 +1,10 @@
-# ⚡ Excel AI Copilot Add-in
+# ⚡ Excel AI Add-ins
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform: Microsoft Excel](https://img.shields.io/badge/Excel-Desktop%20%7C%20Web-107C41.svg?logo=microsoftexcel&logoColor=white)](https://office.com)
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-339933.svg?logo=node.js&logoColor=white)](https://nodejs.org)
 
-An intelligent, enterprise-grade AI Copilot Taskpane Add-in for **Microsoft Excel**. Operates directly inside your Excel workbook (both Excel Desktop and Excel for the Web) to analyze data, generate advanced formulas, clean datasets with 1-click tools, and write computation results directly into worksheet cells.
+An intelligent, enterprise-grade AI Taskpane Add-in for **Microsoft Excel**. Operates directly inside your Excel workbook (both Excel Desktop and Excel for the Web) to analyze data, generate advanced formulas, clean datasets with 1-click tools, and write computation results directly into worksheet cells with autonomous agent capabilities.
 
 ---
 
@@ -29,6 +29,7 @@ An intelligent, enterprise-grade AI Copilot Taskpane Add-in for **Microsoft Exce
 * **🤖 Multi-Model AI Flexibility**:
   * **Demo / Offline Mode**: Works out of the box without any API Key!
   * **Google Gemini API**: Recommended (Gemini 3.5 Flash / 3.8 Flash for ultra-fast, accurate responses).
+  * **Anthropic Claude**: Support for Claude 3.5 Sonnet / Claude 3.7.
   * **OpenAI**: Supports GPT-4o and GPT-4o mini.
   * **Azure OpenAI / Enterprise Gateway**: Connect to internal enterprise endpoints.
 
@@ -37,7 +38,7 @@ An intelligent, enterprise-grade AI Copilot Taskpane Add-in for **Microsoft Exce
 ## 📦 Project Structure
 
 ```text
-excel-ai-copilot/
+excel-ai-add-ins/
 │
 ├── 1-Install-Addin.bat        # [1-Click Setup] Windows automated installer
 ├── 2-Jalankan-Server.bat      # Starts local HTTPS server & opens dashboard
@@ -68,8 +69,8 @@ excel-ai-copilot/
 
 1. Clone or download this repository:
    ```bash
-   git clone https://github.com/avianhermana/excel-ai-copilot.git
-   cd excel-ai-copilot
+   git clone https://github.com/avianhermana/excel-ai-add-ins.git
+   cd excel-ai-add-ins
    ```
 2. Double-click **`1-Install-Addin.bat`**. The installer will automatically:
    * Verify your Node.js installation (or offer to install it).
@@ -77,15 +78,15 @@ excel-ai-copilot/
    * Generate a self-signed SSL certificate for `localhost`.
    * Register the certificate in the Windows Trusted Root store.
    * Configure Excel WebView2 and register the manifest folder into Excel's `Trusted Catalogs`.
-   * Create a **Mulai Telkomsel Copilot** shortcut on your Desktop.
+   * Create a **Mulai Excel AI Add-ins** shortcut on your Desktop.
 
 3. Double-click **`2-Jalankan-Server.bat`** (or the Desktop shortcut) to start the local HTTPS server.
 
 4. Open **Microsoft Excel Desktop**:
    * Navigate to the **Insert** tab ➔ click **My Add-ins**.
    * Switch to the **SHARED FOLDER** tab.
-   * Select **Copilot for Excel** ➔ click **Add**.
-   * The Copilot AI sidepanel will open immediately!
+   * Select **Excel AI Add-ins** ➔ click **Add**.
+   * The AI Add-in sidepanel will open immediately!
 
 ---
 
@@ -108,7 +109,7 @@ Click the **Settings (⚙️)** gear icon in the top right of the sidepanel to c
    * Select **Google Gemini API**.
    * Get a free API Key from [Google AI Studio](https://aistudio.google.com/).
    * Paste your key into the API Key field and save.
-2. **OpenAI / Azure OpenAI**:
+2. **OpenAI / Azure OpenAI / Claude**:
    * Select **OpenAI** or **Azure OpenAI / Enterprise Gateway**.
    * Enter your API Key (and custom Endpoint URL for Azure).
    * All API keys are securely stored solely in your local browser (`localStorage`) and never shared externally.

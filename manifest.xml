@@ -10,7 +10,7 @@
   <Version>1.0.0.0</Version>
   <ProviderName>Antigravity AI</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
-  <DisplayName DefaultValue="AI Copilot for Excel" />
+  <DisplayName DefaultValue="Excel AI Add-ins" />
   <Description DefaultValue="Asisten AI Cerdas untuk Microsoft Excel: Analisis data, generate rumus, dan manipulasi sheet." />
   <IconUrl DefaultValue="https://localhost:3000/assets/icon-32.png" />
   <HighResolutionIconUrl DefaultValue="https://localhost:3000/assets/icon-64.png" />
@@ -39,8 +39,8 @@
           </GetStarted>
           <FunctionFile resid="Taskpane.Url"/>
           <ExtensionPoint xsi:type="PrimaryCommandSurface">
-            <CustomTab id="CopilotTab">
-              <Group id="CopilotGroup">
+            <CustomTab id="ExcelAiTab">
+              <Group id="ExcelAiGroup">
                 <Label resid="GroupLabel"/>
                 <Icon>
                   <bt:Image size="16" resid="Icon.16x16"/>
@@ -81,14 +81,14 @@
           <bt:Url id="Taskpane.Url" DefaultValue="https://localhost:3000/taskpane.html"/>
         </bt:Urls>
         <bt:ShortStrings>
-          <bt:String id="GetStarted.Title" DefaultValue="AI Copilot Loaded!"/>
-          <bt:String id="GroupLabel" DefaultValue="AI Copilot"/>
-          <bt:String id="ButtonLabel" DefaultValue="Copilot Panel"/>
-          <bt:String id="ButtonTitle" DefaultValue="Buka AI Copilot"/>
-          <bt:String id="TabLabel" DefaultValue="Copilot AI"/>
+          <bt:String id="GetStarted.Title" DefaultValue="Excel AI Add-ins Loaded!"/>
+          <bt:String id="GroupLabel" DefaultValue="Excel AI"/>
+          <bt:String id="ButtonLabel" DefaultValue="AI Panel"/>
+          <bt:String id="ButtonTitle" DefaultValue="Buka Excel AI"/>
+          <bt:String id="TabLabel" DefaultValue="Excel AI"/>
         </bt:ShortStrings>
         <bt:LongStrings>
-          <bt:String id="GetStarted.Description" DefaultValue="Klik tombol Copilot Panel untuk membuka asisten AI Excel Anda."/>
+          <bt:String id="GetStarted.Description" DefaultValue="Klik tombol AI Panel untuk membuka asisten AI Excel Anda."/>
           <bt:String id="ButtonDescription" DefaultValue="Buka panel asisten AI Excel untuk analisis data, buat rumus, dan manipulasi sheet."/>
         </bt:LongStrings>
       </Resources>

@@ -1,10 +1,10 @@
 @echo off
 setlocal enabledelayedexpansion
-title Setup Telkomsel Copilot for Excel
+title Setup Excel AI Add-ins
 color 0A
 
 echo =====================================================================
-echo       INSTALLER TELKOMSEL COPILOT FOR EXCEL (1-CLICK SETUP)
+echo       INSTALLER EXCEL AI ADD-INS (1-CLICK SETUP)
 echo =====================================================================
 echo.
 
@@ -90,8 +90,8 @@ echo   [OK] Folder add-in berhasil didaftarkan ke katalog Excel!
 :: 6. Buat Shortcut di Desktop
 echo.
 echo Membuat shortcut di Desktop...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut([System.IO.Path]::Combine([Environment]::GetFolderPath('Desktop'), 'Mulai Telkomsel Copilot.lnk')); $s.TargetPath = [System.IO.Path]::Combine('%SCRIPT_DIR%', '2-Jalankan-Server.bat'); $s.WorkingDirectory = '%SCRIPT_DIR%'; $s.Save()" >nul 2>nul
-echo   [OK] Shortcut 'Mulai Telkomsel Copilot' berhasil dibuat di Desktop Anda.
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut([System.IO.Path]::Combine([Environment]::GetFolderPath('Desktop'), 'Mulai Excel AI Add-ins.lnk')); $s.TargetPath = [System.IO.Path]::Combine('%SCRIPT_DIR%', '2-Jalankan-Server.bat'); $s.WorkingDirectory = '%SCRIPT_DIR%'; $s.Save()" >nul 2>nul
+echo   [OK] Shortcut 'Mulai Excel AI Add-ins' berhasil dibuat di Desktop Anda.
 
 echo.
 echo =====================================================================
@@ -104,8 +104,8 @@ echo    (atau melalui shortcut di Desktop).
 echo 2. Buka Excel Desktop:
 echo    - Klik menu Insert (Sisipkan) ^> My Add-ins (Add-in Saya).
 echo    - Pilih tab 'SHARED FOLDER' (Folder Bersama).
-echo    - Klik 'Copilot for Excel' ^> Add (Tambah).
-echo 3. Selesai! Panel Telkomsel Copilot akan langsung muncul di samping Excel.
+echo    - Klik 'Excel AI Add-ins' ^> Add (Tambah).
+echo 3. Selesai! Panel Excel AI Add-ins akan langsung muncul di samping Excel.
 echo.
 echo (Untuk Excel Web / Office 365 di browser:
 echo  Masuk menu Insert ^> Add-ins ^> Manage My Add-ins ^> Upload My Add-in

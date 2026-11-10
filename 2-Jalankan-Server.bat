@@ -1,10 +1,10 @@
 @echo off
 setlocal enabledelayedexpansion
-title Telkomsel Copilot for Excel - Backend Server
+title Excel AI Add-ins - Backend Server
 color 0B
 
 echo =====================================================================
-echo         TELKOMSEL COPILOT FOR EXCEL - BACKEND SERVER
+echo             EXCEL AI ADD-INS - BACKEND SERVER
 echo =====================================================================
 echo.
 
@@ -23,13 +23,13 @@ if %ERRORLEVEL% neq 0 (
 :: Cek apakah port 3000 sedang berjalan
 netstat -ano | findstr :3000 | findstr LISTENING >nul 2>nul
 if %ERRORLEVEL% equ 0 (
-    echo [INFO] Server Telkomsel Copilot tampaknya sudah berjalan di port 3000.
+    echo [INFO] Server Excel AI Add-ins tampaknya sudah berjalan di port 3000.
     echo.
 )
 
-echo Menjalankan server HTTPS Telkomsel Copilot di port 3000...
+echo Menjalankan server HTTPS Excel AI Add-ins di port 3000...
 echo.
-echo Pastikan jendela ini TETAP TERBUKA selama Anda menggunakan Copilot di Excel.
+echo Pastikan jendela ini TETAP TERBUKA selama Anda menggunakan Excel AI Add-ins.
 echo (Tekan Ctrl+C untuk menghentikan server jika sudah selesai).
 echo.
 

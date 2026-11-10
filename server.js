@@ -43,7 +43,7 @@ async function getOrGenerateCerts() {
   const attrs = [
     { name: 'commonName', value: 'localhost' },
     { name: 'countryName', value: 'ID' },
-    { name: 'organizationName', value: 'Excel Copilot Local Dev' }
+    { name: 'organizationName', value: 'Excel AI Add-ins Local Dev' }
   ];
   
   const pems = await selfsigned.generate(attrs, {
@@ -162,7 +162,7 @@ app.post('/api/chat', async (req, res) => {
 
     const contextStr = buildSpreadsheetContext(excelContext);
 
-    const systemPrompt = `Anda adalah "Copilot for Excel - Autonomous Spreadsheet Agent" (Arsitektur penalaran tingkat tinggi setara Claude for Excel & ChatGPT Code Interpreter).
+    const systemPrompt = `Anda adalah "Excel AI Add-ins - Autonomous Spreadsheet Agent" (Arsitektur penalaran tingkat tinggi setara Claude for Excel & ChatGPT Code Interpreter).
 
 TUGAS DAN PRINSIP KERJA ANDA (3 PILAR UTAMA):
 1. MENGANALISIS KEBUTUHAN PENGGUNA (Intent Analysis):
@@ -570,7 +570,7 @@ async function startServer() {
 
     server.listen(PORT, () => {
       console.log(`=======================================================`);
-      console.log(`🚀 Copilot for Excel (ReAct Agent) aktif di https://localhost:${PORT}`);
+      console.log(`🚀 Excel AI Add-ins (Spreadsheet Agent) aktif di https://localhost:${PORT}`);
       console.log(`📊 Office Add-in Taskpane siap digunakan di Microsoft Excel.`);
       console.log(`=======================================================`);
     });

@@ -1,4 +1,4 @@
-# 📑 Panduan Instalasi & Penggunaan: Telkomsel Copilot for Excel
+# 📑 Panduan Instalasi & Penggunaan: Telkomsel Excel AI Add-ins
 
 > **Asisten AI Cerdas Berkinerja Tinggi untuk Pengolahan Spreadsheet Jaringan Telekomunikasi & Analitik Data Telkomsel**
 
@@ -7,11 +7,11 @@
 ## ⚡ Ringkasan Cepat (3 Langkah Mudah)
 
 1. **Jalankan `1-Install-Addin.bat`** (cukup sekali di awal).
-2. **Jalankan `2-Jalankan-Server.bat`** (atau klik shortcut *Mulai Telkomsel Copilot* di Desktop).
+2. **Jalankan `2-Jalankan-Server.bat`** (atau klik shortcut *Mulai Excel AI Add-ins* di Desktop).
 3. **Buka Excel**:
    * Masuk menu **Insert** (*Sisipkan*) ➔ **My Add-ins** (*Add-in Saya*).
    * Pilih tab **SHARED FOLDER** (*Folder Bersama*).
-   * Klik **Copilot for Excel** ➔ **Add** (*Tambah*).
+   * Klik **Excel AI Add-ins** ➔ **Add** (*Tambah*).
 
 ---
 
@@ -28,19 +28,19 @@
 ## 🛠️ Panduan Instalasi Detail
 
 ### Opsi A: Penggunaan di Excel Desktop (Windows)
-1. Clone repository ini menggunakan Git (`git clone https://github.com/avianhermana/excel-ai-copilot.git`) atau ekstrak file ke folder kerja Anda.
+1. Clone repository ini menggunakan Git (`git clone https://github.com/avianhermana/excel-ai-add-ins.git`) atau ekstrak file ke folder kerja Anda.
 2. Klik 2x file **`1-Install-Addin.bat`**. Installer otomatis:
    * Memeriksa apakah Node.js sudah ada.
    * Mendaftarkan sertifikat SSL localhost ke Windows Trust Store agar tidak diblokir WebView2.
    * Mendaftarkan folder manifest ke katalog resmi Excel Desktop (*Trusted Catalogs*).
-   * Membuat shortcut **Mulai Telkomsel Copilot** di Desktop.
-3. Klik 2x shortcut **Mulai Telkomsel Copilot** di Desktop (atau jalankan `2-Jalankan-Server.bat`).
+   * Membuat shortcut **Mulai Excel AI Add-ins** di Desktop.
+3. Klik 2x shortcut **Mulai Excel AI Add-ins** di Desktop (atau jalankan `2-Jalankan-Server.bat`).
    * *Biarkan jendela terminal hitam ini tetap terbuka selama menggunakan Excel.*
 4. Buka Microsoft Excel di komputer Anda:
    * Buka workbook data yang ingin Anda olah.
    * Klik tab **Insert** ➔ klik panah kecil di **My Add-ins**.
-   * Pilih tab **SHARED FOLDER** ➔ pilih **Copilot for Excel** ➔ klik **Add**.
-5. Panel Telkomsel Copilot akan langsung terbuka di sebelah kanan lembar kerja Anda.
+   * Pilih tab **SHARED FOLDER** ➔ pilih **Excel AI Add-ins** ➔ klik **Add**.
+5. Panel Excel AI Add-ins akan langsung terbuka di sebelah kanan lembar kerja Anda.
 
 ---
 
@@ -53,17 +53,18 @@ Jika Anda membuka Excel melalui browser (`365tsel-my.sharepoint.com`):
    * Pilih **Upload My Add-in** (*Unggah Add-in Saya*).
    * Klik tombol **Browse** dan pilih file `manifest.xml` dari folder distribusi ini.
    * Klik **Upload**.
-3. Ikon **Copilot AI** akan langsung muncul di Ribbon menu atas.
+3. Ikon **Excel AI** akan langsung muncul di Ribbon menu atas.
 
 ---
 
-## 🔑 Pengaturan Model AI (Google Gemini / Azure OpenAI)
+## 🔑 Pengaturan Model AI (Google Gemini / Anthropic Claude / OpenAI / Azure)
 
-Copilot for Excel sudah dilengkapi dengan **Mode Demo/Offline** bawaan. Namun untuk mengaktifkan kecerdasan penuh tingkat tinggi:
+Excel AI Add-ins sudah dilengkapi dengan **Mode Demo/Offline** bawaan. Namun untuk mengaktifkan kecerdasan penuh tingkat tinggi:
 
-1. Klik tombol roda gigi **Settings (⚙️)** di pojok kanan atas header panel Copilot.
+1. Klik tombol roda gigi **Settings (⚙️)** di pojok kanan atas header panel Excel AI.
 2. Pilih provider AI:
    * **Google Gemini API** *(Sangat direkomendasikan - Model Gemini 3.5 Flash cepat dan akurat)*.
+   * **Anthropic Claude API** *(Claude 3.5 Sonnet / 3.7)*.
    * **Azure OpenAI / Enterprise Telkomsel Gateway**.
    * **OpenAI (ChatGPT GPT-4o)**.
 3. Masukkan **API Key** Anda:
@@ -71,7 +72,7 @@ Copilot for Excel sudah dilengkapi dengan **Mode Demo/Offline** bawaan. Namun un
      1. Buka [https://aistudio.google.com/](https://aistudio.google.com/).
      2. Login dengan akun Google Anda.
      3. Klik **Get API key** ➔ **Create API key**.
-     4. Salin kunci (berawalan `AIzaSy...` atau `AQ...`) dan tempelkan ke kolom API Key di panel Copilot.
+     4. Salin kunci (berawalan `AIzaSy...` atau `AQ...`) dan tempelkan ke kolom API Key di panel Excel AI.
 4. Klik tombol **💾 Simpan Pengaturan**.
 
 > 🔒 **Keamanan & Privasi**: API Key disimpan hanya di browser lokal Anda (`localStorage`) dan tidak pernah dikirim ke pihak luar mana pun.
@@ -80,13 +81,13 @@ Copilot for Excel sudah dilengkapi dengan **Mode Demo/Offline** bawaan. Namun un
 
 ## 💡 Contoh Penggunaan Praktis untuk Data Jaringan Telkomsel
 
-Copilot memahami hirarki dan terminologi jaringan telekomunikasi (FTTH, OLT, ODC, ODP, feeder, core, status provisioning):
+Excel AI memahami hirarki dan terminologi jaringan telekomunikasi (FTTH, OLT, ODC, ODP, feeder, core, status provisioning):
 
 ### 1. Menghitung Jumlah Perangkat Jaringan (Distinct Count Kolom Penuh)
 Ketik santai di kolom chat:
 > *"Tolong hitung jumlah unik perangkat OLT, ODC, dan ODP di sheet ini"*
 
-*Copilot akan otomatis menyusun rumus Excel 365 dinamis:*
+*Excel AI akan otomatis menyusun rumus Excel 365 dinamis:*
 ```excel
 =COUNTA(UNIQUE(FILTER(A3:A250000, A3:A250000<>"")))
 ```
@@ -113,7 +114,7 @@ Ketik santai di kolom chat:
 **A:** Pastikan jendela terminal `2-Jalankan-Server.bat` sedang berjalan di latar belakang (port 3000 HTTPS).
 
 **Q: Bagaimana cara memperbarui tampilan taskpane jika ada perubahan?**  
-**A:** Cukup klik kanan di area kosong mana saja di panel Copilot ➔ pilih **Reload** (atau tekan tombol **F5** pada keyboard).
+**A:** Cukup klik kanan di area kosong mana saja di panel Excel AI ➔ pilih **Reload** (atau tekan tombol **F5** pada keyboard).
 
 ---
 

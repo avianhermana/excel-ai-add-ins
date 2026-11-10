@@ -1,7 +1,7 @@
 {
-  "name": "excel-ai-copilot",
+  "name": "excel-ai-add-ins",
   "version": "1.0.0",
-  "description": "Enterprise AI Copilot Taskpane Add-in for Microsoft Excel with Office.js automation and multi-model AI support (Google Gemini, OpenAI, Azure OpenAI).",
+  "description": "Enterprise AI Taskpane Add-in for Microsoft Excel with Office.js automation and multi-model AI support (Google Gemini, Claude, OpenAI, Azure OpenAI).",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -11,10 +11,11 @@
     "excel",
     "excel-addin",
     "office-js",
-    "copilot",
+    "excel-ai",
     "ai",
     "gemini",
     "openai",
+    "claude",
     "taskpane"
   ],
   "author": "avianhermana",

@@ -12,9 +12,9 @@ let currentSelection = {
 let chatHistory = [];
 
 let settings = {
-  provider: localStorage.getItem("copilot_provider") || "demo",
-  apiKey: localStorage.getItem("copilot_api_key") || "",
-  endpoint: localStorage.getItem("copilot_endpoint") || ""
+  provider: localStorage.getItem("excel_ai_provider") || localStorage.getItem("copilot_provider") || "demo",
+  apiKey: localStorage.getItem("excel_ai_api_key") || localStorage.getItem("copilot_api_key") || "",
+  endpoint: localStorage.getItem("excel_ai_endpoint") || localStorage.getItem("copilot_endpoint") || ""
 };
 
 // Helper: Konversi Huruf Kolom ke Index (0-based) & sebaliknya
@@ -1046,9 +1046,9 @@ function saveSettings() {
   settings.apiKey = apiKey;
   settings.endpoint = endpoint;
 
-  localStorage.setItem("copilot_provider", provider);
-  localStorage.setItem("copilot_api_key", apiKey);
-  localStorage.setItem("copilot_endpoint", endpoint);
+  localStorage.setItem("excel_ai_provider", provider);
+  localStorage.setItem("excel_ai_api_key", apiKey);
+  localStorage.setItem("excel_ai_endpoint", endpoint);
 
   updateSettingsUI();
   document.getElementById("tab-settings").classList.add("hidden");
